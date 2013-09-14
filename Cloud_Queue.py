@@ -18,12 +18,12 @@
 """
 CREATING QUEUE
 $ curl -i -X PUT https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue -d'{"Aaron": "My Test Queue"}' \
-                            -H"Content-type: application/json" -H"X-Auth-Token: 5436552e4064431b8d4f7d945ffd777b" \
+                            -H"Content-type: application/json" -H"X-Auth-Token: 5436552e4948uf1b8d4f7d9he6fd777b" \
                             -H "Accept: application/json"
 
 RETURN VALUE=====>>>
 HTTP/1.1 201 CreatedContent-Length: 0
-Location: /v1/queues/kidrack_queue
+Location: /v1/queues/{queuename}
 """
 
 #Need to use this url to get logging working...need console output for diagnostics while writing code
@@ -190,10 +190,10 @@ c.close()
 
 
 ### CONNECT TO DATABASE
-db_user = 'remotesysloguser'
-db_password = 'ihatersyslogface'
-target_server = 'localhost'
-my_database = 'Syslog'
+db_user = 'XXXXXXXXXXX'
+db_password = 'XXXXXXXXXXX'
+target_server = 'XXXXXXXXXXX'
+my_database = 'XXXXXXXXXXX'
 qlogger.info("======Initializing connection to local Syslog database======")
 try:
   #Create connection
@@ -250,7 +250,7 @@ for ip in banned_IPs:
 #
 #  def Auth(self):
 #    """
-#    curl -D - -H"X-Auth-User: rackerone" -H"X-Auth-Key:0d9dbaf3aaeb96eeacd3642ee4ce44d7" https://auth.api.rackspacecloud.com/v1.0
+#    curl -D - -H"X-Auth-User: rackspaceUsername" -H"X-Auth-Key:0d9dbawo9aeb96eerik3642ee4tj98d7" https://auth.api.rackspacecloud.com/v1.0
 #    This method works but it will not save the buffer output for parsing.  Prob variable scope issue....?/
 #    """
 #    c = pycurl.Curl()
@@ -277,10 +277,10 @@ for ip in banned_IPs:
 #    c.close()
 #
 ##CHANGE THIS LATER BY ADDING CONFIG FILE FOR THIS STUFF
-#db_user = 'remotesysloguser'
-#db_password = 'ihatersyslogface'
-#target_server = 'localhost'
-#my_database = 'Syslog'
+#db_user = 'XXXXXXXXXXX'
+#db_password = 'XXXXXXXXXXX'
+#target_server = 'XXXXXXXXXXX'
+#my_database = 'XXXXXXXXXXX'
 #db = ''
 #
 #class SyslogDB():
@@ -372,7 +372,7 @@ for ip in banned_IPs:
 ###buf = cStringIO.StringIO()
 ### 
 ###c = pycurl.Curl()
-###c.setopt(c.URL, 'http://news.ycombinator.com')
+###c.setopt(c.URL, 'https://google.com')
 ###c.setopt(c.WRITEFUNCTION, buf.write)
 ###c.perform()
 ### c.setopt(pycurl.HTTPHEADER, ['Accept: application/json'])
