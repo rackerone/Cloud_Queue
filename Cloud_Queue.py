@@ -151,7 +151,10 @@ qlogger.info('Username: %s' % cloud_username)
 qlogger.info('API Key: %s' % cloud_api_key)
 qlogger.info("Done processing local config file!")
 
-
+db_user = 'XXXXXXXXXXX'
+db_password = 'XXXXXXXXXXX'
+target_server = 'XXXXXXXXXXX'
+my_database = 'XXXXXXXXXXX'
 
 
 #========================================================================================
@@ -190,10 +193,6 @@ c.close()
 
 
 ### CONNECT TO DATABASE
-db_user = 'XXXXXXXXXXX'
-db_password = 'XXXXXXXXXXX'
-target_server = 'XXXXXXXXXXX'
-my_database = 'XXXXXXXXXXX'
 qlogger.info("======Initializing connection to local Syslog database======")
 try:
   #Create connection
@@ -275,13 +274,6 @@ for ip in banned_IPs:
 #    qlogger.info("Retrieved API Token: %s" % cloud_api_token)
 #    return cloud_api_token
 #    c.close()
-#
-##CHANGE THIS LATER BY ADDING CONFIG FILE FOR THIS STUFF
-#db_user = 'XXXXXXXXXXX'
-#db_password = 'XXXXXXXXXXX'
-#target_server = 'XXXXXXXXXXX'
-#my_database = 'XXXXXXXXXXX'
-#db = ''
 #
 #class SyslogDB():
 #  """Manage connections to local mysql syslog database
