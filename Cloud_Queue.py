@@ -221,7 +221,11 @@ for row in all_data:
   string = row[3]    #<---this row contains the banned IP
   ip = re.findall(ip_pattern, string)
   banned_IPs.append(ip[0])
-print banned_IPs
+#we now have a list of banned IP addresses ==>banned_IPs
+qlogger.info('We now have a list of banned IP addresses!!!!')
+print "We have discovered the following IP address have been banned on Rackerone.com:"
+for ip in banned_IPs:
+  print ip
 
 
 
