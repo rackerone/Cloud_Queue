@@ -14,23 +14,22 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
-
 """
 CREATING QUEUE
-$ curl -i -X PUT https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue -d'{"Aaron": "My Test Queue"}' \
-                            -H"Content-type: application/json" -H"X-Auth-Token: 5436552e4948uf1b8d4f7d9he6fd777b" \
+$ curl -i -X PUT https://ord.queues.api.rackspacecloud.com/v1/queues/test_queue -d'{"TestName": "My Test Queue Desctiption"}' \
+                            -H"Content-type: application/json" -H"X-Auth-Token: AUTHTOKENGOESHERE" \
                             -H "Accept: application/json"
 
 RETURN VALUE=====>>>
 HTTP/1.1 201 CreatedContent-Length: 0
-Location: /v1/queues/{queuename}
+Location: /v1/queues/test_queueu
 """
 
 #Need to use this url to get logging working...need console output for diagnostics while writing code
 #--->  http://docs.python.org/dev/howto/logging.html
 
 import pycurl
-#import pyrax  # <----not needed
+import pyrax
 import getpass
 import cStringIO
 import subprocess
@@ -42,36 +41,39 @@ import pwd      # <---import 'the password database' to get access to user/group
 import ConfigParser    # <----use to parse config file containing cloud credentials
 import MySQLdb as mysqldb
 
-
 #========================================================================================
 #SET UP GLOBAL VARIABLES
 #========================================================================================
 #RESPONSE = ''     #<----this will be used to capture pycurl buffer responses. we will reuse as necessary.
+CONFIG_FILE = "/etc/Cloud_Queue.conf"
 CREDS_FILE = "~/.rackspace_cloud_credentials"
-
-
+LOG_FILE = '/var/log/Cloud_Queue.log'    # <--application log file
+FIRST_RUN = True  # <--Must execute as root when first run so that it can create proper log files.  Assuming 'first-run' before check is done
 
 #========================================================================================
 #SET UP LOGGING
 #========================================================================================
 
-LOG_FILE = '/var/log/Cloud_Queue.log'    # <--application log file
-FIRST_RUN = True  # <--Must execute as root when first run so that it can create proper log files.  Assuming 'first-run' before check is done
-
 #Checking for the existence of the Cloud_Queue log file.  If it does not exist then leaving FIRST_RUN as True.
-if os.path.exists(LOG_FILE):
-  FIRST_RUN = False        #<---is log file exists then this is not first run
+if os.path.exists(LOG_FILE) and os.path.exists(CONFIG_FILE):
+  FIRST_RUN = False        # <---is log file exists then this is not first run
 
 #Verifying that we can open and write to log file
-f = ''    #<---initialze the file handle for our log file
+f_log = ''    #<---initialze the file handle for our log file
+
 try:
-  f = open(LOG_FILE, "aw")
+  f_log = open(LOG_FILE, "aw")
+  conf_file = open(CONFIG_FILE, "aw")  
 except IOError:
   if FIRST_RUN:
     print "This appears to be the first time you have executed this script.  You must execute with 'sudo' on first run!"
+    print ""
     #could also check for root with 'if os.getuid() != 0:'
     sys.exit(1)
-  print "Unable to open log file '%s'.  Please check file permissions/ownership" % LOG_FILE
+  if not f_log:
+    print "Unable to open log file, '%s'.  Please check file permissions/ownership" % LOG_FILE
+  if not conf_file:
+    print "Unable to open configuration file, %s.  Please check file permissions/ovnership" % CONFIG_FILE
   sys.exit(1)
 finally:
   if f:
@@ -126,19 +128,19 @@ qlogger.info('This is my named qlogger - debug')
 #========================================================================================
 # READ CONFIGURATION FILE AND PARSE CREDENTIALS   -need to set up config file with cloud creds and db creds
 #========================================================================================
-qlogger.info("Read and process local credential configuration file '%s'..." % CREDS_FILE)
+qlogger.info("Read and process local credential configuration file '%s'..." % CONFIG_FILE)
 my_config = ConfigParser.ConfigParser()
-my_config.read(os.path.expanduser(CREDS_FILE))
+my_config.read(os.path.expanduser(CONFIG_FILE))
 my_config.sections()
 rackspace_config = my_config.sections()[0]
 
-def ParseConfigSections(section):
+def ParseConfigSections(rackspace_section):
   """Parse the '.rackspace_cloud_credentials' file and save username and api key"""
   cred_dict = {}
-  options = my_config.options(section)
+  options = my_config.options(rackspace_section)
   for option in options:
     try:
-      cred_dict[option] = my_config.get(section, option)
+      cred_dict[option] = my_config.get(rackspace_section, option)
     except Exception as e:
       qlogger.error(e)
   return cred_dict
@@ -151,15 +153,12 @@ qlogger.info('Username: %s' % cloud_username)
 qlogger.info('API Key: %s' % cloud_api_key)
 qlogger.info("Done processing local config file!")
 
-db_user = 'XXXXXXXXXXX'
-db_password = 'XXXXXXXXXXX'
-target_server = 'XXXXXXXXXXX'
-my_database = 'XXXXXXXXXXX'
+
 
 
 #========================================================================================
 # Authenticate to Rackspace cloud and retrieve API token:
-#curl -D - -H"X-Auth-User: rackerone" -H"X-Auth-Key:0d9dbaf3aaeb96eeacd3642ee4ce44d7" https://auth.api.rackspacecloud.com/v1.0
+#curl -D - -H"X-Auth-User: MY_CLOUD_USERNAME" -H"X-Auth-Key:MY_CLOUD_API__KEY" https://auth.api.rackspacecloud.com/v1.0
 #========================================================================================
 qlogger.info("Authenticating to Rackspace Cloud and retrieving API token")
 auth_url = 'https://auth.api.rackspacecloud.com/v1.0'
@@ -191,161 +190,138 @@ qlogger.info("Retrieved API Token: %s" % cloud_api_token)
 #print cloud_api_token
 c.close()
 
-
-### CONNECT TO DATABASE
-qlogger.info("======Initializing connection to local Syslog database======")
-try:
-  #Create connection
-  db = mysqldb.connect(target_server, db_user, db_password, my_database)
-except Exception as e:
-  qlogger.error(e)
-if db:
-  qlogger.info("Successfully created database connection to %s!" % my_database)
-cursor = db.cursor()
-qlogger.info("======Syslog() database initialization complete!======")
-statement = "select ID, DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %';"
-#This will find all messages from fail2ban that contain the string 'Ban'
-qlogger.info("Executing statement: \n%s\n\n" % statement)
-cursor.execute(statement)
-#To get row count of returned results
-cursor.rowcount       #<---read-only attribute
-##To fetch a single row at a time
-#data = cursor.fetchone()
-#To fetch all rows at once into a tuple
-all_data = cursor.fetchall()
-banned_IPs = []
-ip_pattern = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
-#findIP = re.findall(ipPattern,string)
-for row in all_data:
-  string = row[3]    #<---this row contains the banned IP
-  ip = re.findall(ip_pattern, string)
-  banned_IPs.append(ip[0])
-#we now have a list of banned IP addresses ==>banned_IPs
-qlogger.info('We now have a list of banned IP addresses!!!!')
-print "We have discovered the following IP address have been banned on Rackerone.com:"
-for ip in banned_IPs:
-  print ip
-
-
-
-
-
 #========================================================================================
 # SET UP CLASSES
 #========================================================================================
-#
-#q_url = 'https://ord.queues.api.rackspacecloud.com/v1/queues/'
-#
-#class Cloud_Queue():
-#  """Rackspace Cloud Queue"""
-#  def __init__(self):
-#    self.q_url = q_url
-#    self.auth_url = auth_url
-#    self.username = cloud_username
-#    self.api_key = cloud_api_key
-#    self.content_type = content_type_header
-#    self.accept = accept_header
-#    #self.queue_name = queue_name
-#
-#  def Auth(self):
-#    """
-#    curl -D - -H"X-Auth-User: rackspaceUsername" -H"X-Auth-Key:0d9dbawo9aeb96eerik3642ee4tj98d7" https://auth.api.rackspacecloud.com/v1.0
-#    This method works but it will not save the buffer output for parsing.  Prob variable scope issue....?/
-#    """
-#    c = pycurl.Curl()
-#    body = cStringIO.StringIO()
-#    hdr = cStringIO.StringIO()     # when we authenticate the information we require is returned in the header
-#    c.setopt(c.WRITEFUNCTION, body.write)
-#    c.setopt(c.HEADERFUNCTION, hdr.write)
-#    c.setopt(c.URL, auth_url)
-#    c.setopt(c.HTTPHEADER, ["X-Auth-User:%s" % cloud_username, "X-Auth-Key:%s" % cloud_api_key])
-#    c.setopt(c.CONNECTTIMEOUT, 5)
-#    c.setopt(c.TIMEOUT, 8)
-#    c.setopt(c.VERBOSE, False)
-#    c.setopt(c.SSL_VERIFYPEER, False)
-#    c.setopt(c.FAILONERROR, True)
-#    c.perform()
-#    hdr_response = hdr.getvalue()
-#    body_response = body.getvalue()
-#    #print "status code: %s" % c.getinfo(pycurl.HTTP_CODE)
-#    #print "effective URL: %s" % c.getinfo(pycurl.EFFECTIVE_URL)
-#    token_line = hdr_response.splitlines()[8]  #<--This line contains the api token
-#    cloud_api_token = token_line.split(":")[1].strip()
-#    qlogger.info("Retrieved API Token: %s" % cloud_api_token)
-#    return cloud_api_token
-#    c.close()
-#
-#class SyslogDB():
-#  """Manage connections to local mysql syslog database
-#  http://www.tutorialspoint.com/python/python_database_access.htm
-#  """
-#  def __init__(self, server=target_server, user=db_user, password=db_password, database=my_database):
-#    self.server = server
-#    self.database = database
-#    self.user = user
-#    self.password = password
-#    qlogger.info("Done!")
-#    qlogger.info("Connecting to local Syslog database...")
-#    try:
-#      #Create connection
-#      db = mysqldb.connect(host, user, password, database)
-#    except Exception as e:
-#      qlogger.error(e)
-#    if db:
-#      qlogger.info("Successfully created database connection to %s!" % database)
-#    qlogger.info("Creating cursor() object used to send statements to mysql...")
-#    cursor = db.cursor()
-#    qlogger.info("Done creating cursor() object!")
-#    qlogger.info("======Syslog() database initialization complete!======")
-# 
-#    
-#    
-#  #def connect(self, host=self.server, database=self.database, user=self.user, password=self.password):
-#  #  """Connect to local Syslog database and create a cursor object to allow queries"""
-#  #  qlogger.info("Connecting to local Syslog database...")
-#  #  try:
-#  #    #Create connection
-#  #    db = mysqldb.connect(host, user, password, database)
-#  #  except Exception as e:
-#  #    qlogger.error(e)
-#  #  if db:
-#  #    qlogger.info("Successfully created database connection to %s!" % database)
-#  #  qlogger.info("Creating cursor() object used to send statements to mysql...")
-#  #  cursor = db.cursor()
-#  #  qlogger.info("Done creating cursor() object!")
-#    
-#  def find_Bans(self):
-#    """Execute SQL statements to interact with database"""
-#    statement = "select ID, DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %';"
-#    #This will find all messages from fail2ban that contain the string 'Ban'
-#    qlogger.info("Executing statement: \n%s" % statement)
-#    cursor.execute(statement)
-#    #To get row count of returned results
-#    cursor.rowcount       #<---read-only attribute
-#    ##To fetch a single row at a time
-#    #data = cursor.fetchone()
-#    #To fetch all rows at once into a tuple
-#    all_data = cursor.fetchall()
-#    banned_IPs = {}
-#    ip_pattern = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
-#    #findIP = re.findall(ipPattern,string)
-#    for row in all_data:
-#      string = row[3]    #<---this row contains the banned IP
-#      ip = re.findall(ip_pattern, string)
-#      banned_IPs.append(ip[0])
-#    return banned_IPs
-#    
-#    
-#  def db_Close():
-#    """Close our open database connection"""
-#    db.close()
-#    qlogger.info("Database closed!")
-#    return "Database Closed!"
-#
-#
-#
-#
-#queue = SyslogDB()
+
+q_url = 'https://ord.queues.api.rackspacecloud.com/v1/queues/'
+
+class Cloud_Queue():
+  """Rackspace Cloud Queue"""
+  def __init__(self):
+    self.q_url = q_url
+    self.auth_url = auth_url
+    self.username = cloud_username
+    self.api_key = cloud_api_key
+    self.content_type = content_type_header
+    self.accept = accept_header
+    #self.queue_name = queue_name
+
+  def Auth(self):
+    """
+    curl -D - -H"X-Auth-User: rackerone" -H"X-Auth-Key:0d9dbaf3aaeb96eeacd3642ee4ce44d7" https://auth.api.rackspacecloud.com/v1.0
+    This method works but it will not save the buffer output for parsing.  Prob variable scope issue....?/
+    """
+    c = pycurl.Curl()
+    body = cStringIO.StringIO()
+    hdr = cStringIO.StringIO()     # when we authenticate the information we require is returned in the header
+    c.setopt(c.WRITEFUNCTION, body.write)
+    c.setopt(c.HEADERFUNCTION, hdr.write)
+    c.setopt(c.URL, auth_url)
+    c.setopt(c.HTTPHEADER, ["X-Auth-User:%s" % cloud_username, "X-Auth-Key:%s" % cloud_api_key])
+    c.setopt(c.CONNECTTIMEOUT, 5)
+    c.setopt(c.TIMEOUT, 8)
+    c.setopt(c.VERBOSE, False)
+    c.setopt(c.SSL_VERIFYPEER, False)
+    c.setopt(c.FAILONERROR, True)
+    c.perform()
+    hdr_response = hdr.getvalue()
+    body_response = body.getvalue()
+    #print "status code: %s" % c.getinfo(pycurl.HTTP_CODE)
+    #print "effective URL: %s" % c.getinfo(pycurl.EFFECTIVE_URL)
+    token_line = hdr_response.splitlines()[8]  #<--This line contains the api token
+    cloud_api_token = token_line.split(":")[1].strip()
+    qlogger.info("Retrieved API Token: %s" % cloud_api_token)
+    return cloud_api_token
+    c.close()
+
+
+#CHANGE THIS LATER BY ADDING CONFIG FILE FOR THIS STUFF
+db_user = 'XXXXXXX'
+db_password = 'XXXXXX'
+target_host = 'localhost'
+Syslog_database = 'Syslog'
+
+class SyslogDB():
+  """Manage connections to local mysql syslog database.  When we create the SyslogDB object it will automatically authenticate so we are
+  ready to call methods to interact with db.
+  
+  ::target_host => This is where the syslog database will be located
+  ::db_user => This is the mysql database user name used for interacting with the Syslog database
+  ::db_password => This is the database user password
+  ::Syslog_database => This is the syslog database name where all syslog messages are saved
+  
+  http://www.tutorialspoint.com/python/python_database_access.htm
+  """
+  
+  
+  def __init__(self, host=target_host, user=db_user, password=db_password, database=Syslog_database):
+    qlogger.info("======Initializing SyslogDB() object for mysql interface======")
+    qlogger.info("Assembling arguments for our database object...")
+    self.host = target_host
+    self.database = Syslog_database
+    self.user = db_user
+    self.password = db_password
+    qlogger.info("Done!")
+    qlogger.info("Connecting to local Syslog database...")
+    try:
+      #Create connection
+      db = mysqldb.connect(host, user, password, database)
+    except Exception as e:
+      qlogger.error(e)
+    if db:
+      qlogger.info("Successfully created database connection to %s!" % database)
+    qlogger.info("Creating cursor() object used to send statements to mysql...")
+    cursor = db.cursor()
+    qlogger.info("Done creating cursor() object!")
+    
+    qlogger.info("======Syslog() database initialization complete!======")
+  #  
+  #def connect(self):
+  #  """Connect to local Syslog database and create a cursor object to allow queries"""
+  #  qlogger.info("Connecting to local Syslog database...")
+  #  try:
+  #    #Create connection
+  #    db = mysqldb.connect(host, user, password, database)
+  #  except Exception as e:
+  #    qlogger.error(e)
+  #  if db:
+  #    qlogger.info("Successfully created database connection to %s!" % database)
+  #  qlogger.info("Creating cursor() object used to send statements to mysql...")
+  #  cursor = db.cursor()
+  #  qlogger.info("Done creating cursor() object!")
+  #  
+  def find_Bans(self):
+    """Execute SQL statements to interact with database"""
+    statement = "select ID, DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %';"
+    #This will find all messages from fail2ban that contain the string 'Ban'
+    qlogger.info("Executing statement: \n%s" % statement)
+    cursor.execute(statement)
+    #To get row count of returned results
+    cursor.rowcount       #<---read-only attribute
+    ##To fetch a single row at a time
+    #data = cursor.fetchone()
+    #To fetch all rows at once into a tuple
+    all_data = cursor.fetchall()
+    banned_IPs = {}
+    ip_pattern = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
+    #findIP = re.findall(ipPattern,string)
+    for row in all_data:
+      string = row[3]    #<---this row contains the banned IP
+      ip = re.findall(ip_pattern, string)
+      banned_IPs.append(ip[0])
+    return banned_IPs
+    
+    
+  def db_Close():
+    """Close our open database connection"""
+    db.close()
+    qlogger.info("Database closed!")
+    return "Database Closed!"
+
+
+
+
 
 
 
@@ -364,7 +340,7 @@ for ip in banned_IPs:
 ###buf = cStringIO.StringIO()
 ### 
 ###c = pycurl.Curl()
-###c.setopt(c.URL, 'https://google.com')
+###c.setopt(c.URL, 'http://news.ycombinator.com')
 ###c.setopt(c.WRITEFUNCTION, buf.write)
 ###c.perform()
 ### c.setopt(pycurl.HTTPHEADER, ['Accept: application/json'])
