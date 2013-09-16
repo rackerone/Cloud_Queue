@@ -92,13 +92,15 @@ except IOError:
     print "Unable to open configuration file, %s.  Please check file permissions/ovnership.  Also check the top of this script for config format" % CONFIG_FILE
   sys.exit(1)
 finally:
-  if f:
+  if f_log:
     f.close()
     #I have to do extra work to get uid/gid because when we sudo this script on first run the uid is 0.
     #We don't want to set the ownership of our log to 0 (or root) so we need to know 'who' executed the script
     my_uid = pwd.getpwnam(os.getlogin()).pw_uid   #<--get the UID of the user logged into this machine
     my_gid = pwd.getpwnam(os.getlogin()).pw_gid   #<--get the GID of the user logged into this machine
     os.chown(LOG_FILE, my_uid, my_gid)
+  if conf_file:
+    conf_file.close()
 
 #Set up logging to file--->  remove the filemode ('w') to make the logs append to file rather than overwrite
 logging.basicConfig(level=logging.DEBUG,
