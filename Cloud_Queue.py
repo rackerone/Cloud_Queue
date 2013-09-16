@@ -37,7 +37,7 @@ db_sylog_user_password = 'XXXXXX'
 target_host = 'XXXXXX'
 Syslog_database = 'XXXXXX'
 
-
+#chmod 400 /etc/Cloud_Queue.conf
 """
 
 #Need to use this url to get logging working...need console output for diagnostics while writing code
@@ -149,27 +149,62 @@ qlogger.info('This is my named qlogger - debug')
 qlogger.info("Read and process local credential configuration file '%s'..." % CONFIG_FILE)
 my_config = ConfigParser.ConfigParser()
 my_config.read(os.path.expanduser(CONFIG_FILE))
-my_config.sections()
-rackspace_config = my_config.sections()[0]
-
-def ParseConfigSections(rackspace_section):
-  """Parse the '.rackspace_cloud_credentials' file and save username and api key"""
-  cred_dict = {}
-  options = my_config.options(rackspace_section)
+my_sections = my_config.sections()
+cred_dict = {}
+for section in my_sections:
+  options = my_config.options(section)
   for option in options:
     try:
-      cred_dict[option] = my_config.get(rackspace_section, option)
+      cred_dict[option] = my_config.get(section, option)
     except Exception as e:
       qlogger.error(e)
-  return cred_dict
-
-my_creds = ParseConfigSections(rackspace_config)
-cloud_username = my_creds['username']
-cloud_api_key = my_creds['api_key']
-
+qlogger.info('Done reading file, setting creds...')
+cloud_username = cred_dict['username']
+cloud_api_key = cred_dict['api_key']
+syslog_db_user = cred_dict['db_syslog_user']
+syslog_db_user_pwd = cred_dict['db_sylog_user_password']
+syslog_db_name = cred_dict['syslog_database']
+syslog_db_host = cred_dict['target_host']
+qlogger.info('Done!')
 qlogger.info('Username: %s' % cloud_username)
 qlogger.info('API Key: %s' % cloud_api_key)
+qlogger.info('Syslog DB Name: %s' % syslog_db_name)
+qlogger.info('Syslog DB Username: %s' % syslog_db_user)
+qlogger.info('Syslog DB host: %s' % syslog_db_host)
+if syslog_db_user_pwd:
+  qlogger.info('Syslog DB password set correctly!')
+else:
+  qlogger.error('Syslog DB password might not be set correctly')
 qlogger.info("Done processing local config file!")
+
+
+###my_config = ConfigParser.ConfigParser()
+###my_config.read(os.path.expanduser(CONFIG_FILE))
+###my_config.sections()
+###rackspace_config = my_config.sections()[1]
+###database_config = my_config.sections()[0]
+###
+###def ParseConfigSections(section):
+###  """Parse the '/etc/Cloud_Queue.conf' file and save username, api key, and database credentials"""
+###  cred_dict = {}
+###  options = my_config.options(section)
+###  for option in options:
+###    try:
+###      cred_dict[option] = my_config.get(section, option)
+###    except Exception as e:
+###      #qlogger.error(e)
+###      print e
+###  return cred_dict
+###
+###cloud_creds = ParseConfigSections(rackspace_config)
+###database_creds = ParseConfigSections(database_config)
+###
+###cloud_username = my_creds['username']
+###cloud_api_key = my_creds['api_key']
+###
+###qlogger.info('Username: %s' % cloud_username)
+###qlogger.info('API Key: %s' % cloud_api_key)
+###qlogger.info("Done processing local config file!")
 
 
 
