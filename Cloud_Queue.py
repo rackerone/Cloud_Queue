@@ -276,13 +276,13 @@ class SyslogDB():
   """
   
   
-  def __init__(self, host=syslog_db_host, user=db_user, password=db_password, database=Syslog_database):
+  def __init__(self, host=syslog_db_host, user=syslog_db_user, password=syslog_db_user_pwd, database=syslog_db_name):
     qlogger.info("======Initializing SyslogDB() object for mysql interface======")
     qlogger.info("Assembling arguments for our database object...")
     self.host = syslog_db_host
-    self.database = Syslog_database
-    self.user = db_user
-    self.password = db_password
+    self.database = syslog_db_name
+    self.user = syslog_db_user
+    self.password = syslog_db_user_pwd
     qlogger.info("Done!")
     qlogger.info("Connecting to local Syslog database...")
     try:
