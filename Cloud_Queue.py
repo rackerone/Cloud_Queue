@@ -318,7 +318,7 @@ class SyslogDB():
     qlogger.info("======Syslog() database initialization complete!======")
     statement = "select ID, DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %';"
     #This will find all messages from fail2ban that contain the string 'Ban'
-    qlogger.info("Executing statement: \n%s" % statement)
+    qlogger.info("Executing statement: %s" % statement)
     cursor.execute(statement)
     #To get row count of returned results
     qlogger.info("Statement executed")
@@ -329,6 +329,7 @@ class SyslogDB():
     qlogger.info("Parsing statement return value...")
     all_data = cursor.fetchall()
     banned_IPs = []
+    banned_IPs_filtered = ''
     ip_pattern = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
     #findIP = re.findall(ipPattern,string)
     for row in all_data:
@@ -337,11 +338,14 @@ class SyslogDB():
       banned_IPs.append(ip[0])
     if banned_IPs:
       qlogger.info("Found banned IP addresses!")
+      qlogger.info("Reducing banned IP list by removing duplicates...")
+      banned_IPs_filtered = list(set(banned_IPs))
     else:
       qlogger.info("No new banned IP addresses!")
     for ip in banned_IPs:
       print ip
-    
+    print "now just print with no dups..."
+    print bann_IPs_filtered
     
   def db_Close():
     """Close our open database connection"""
@@ -356,53 +360,3 @@ db_object = SyslogDB()
 db_object.find_Bans()
 
 
-
-
-#x = Cloud_Queue()
-#y = x.q_Auth()
-#print y     #<----prints api token
-#  
-
-  
-    
-###this does not capture value but does auth
-
-###buf = cStringIO.StringIO()
-### 
-###c = pycurl.Curl()
-###c.setopt(c.URL, 'http://news.ycombinator.com')
-###c.setopt(c.WRITEFUNCTION, buf.write)
-###c.perform()
-### c.setopt(pycurl.HTTPHEADER, ['Accept: application/json'])
-###print buf.getvalue()
-###buf.close()
-
-
-
-#### Echo server program
-###import socket,os
-###
-###s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-###try:
-###    os.remove("/tmp/socketname")
-###except OSError:
-###    pass
-###s.bind("/tmp/socketname")
-###s.listen(1)
-###conn, addr = s.accept()
-###while 1:
-###    data = conn.recv(1024)
-###    if not data: break
-###    conn.send(data)
-###conn.close()
-###
-###
-#### Echo client program
-###import socket
-###
-###s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-###s.connect("/tmp/socketname")
-###s.send('Hello, world')
-###data = s.recv(1024)
-###s.close()
-###print 'Received', repr(data)
