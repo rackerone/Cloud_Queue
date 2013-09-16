@@ -93,7 +93,7 @@ except IOError:
   sys.exit(1)
 finally:
   if f_log:
-    f.close()
+    f_log.close()
     #I have to do extra work to get uid/gid because when we sudo this script on first run the uid is 0.
     #We don't want to set the ownership of our log to 0 (or root) so we need to know 'who' executed the script
     my_uid = pwd.getpwnam(os.getlogin()).pw_uid   #<--get the UID of the user logged into this machine
