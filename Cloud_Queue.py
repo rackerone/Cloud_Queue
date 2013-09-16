@@ -170,6 +170,7 @@ qlogger.info('Username: %s' % cloud_username)
 qlogger.info('API Key: %s' % cloud_api_key)
 qlogger.info('Syslog DB Name: %s' % syslog_db_name)
 qlogger.info('Syslog DB Username: %s' % syslog_db_user)
+qlogger.info("Syslog DB User Password: %s" % syslog_db_user_pwd )
 qlogger.info('Syslog DB host: %s' % syslog_db_host)
 if syslog_db_user_pwd:
   qlogger.info('Syslog DB password set correctly!')
@@ -275,7 +276,6 @@ class SyslogDB():
   http://www.tutorialspoint.com/python/python_database_access.htm
   """
   
-  
   def __init__(self, host=syslog_db_host, user=syslog_db_user, password=syslog_db_user_pwd, database=syslog_db_name):
     qlogger.info("======Initializing SyslogDB() object for mysql interface======")
     qlogger.info("Assembling arguments for our database object...")
@@ -284,19 +284,7 @@ class SyslogDB():
     self.user = syslog_db_user
     self.password = syslog_db_user_pwd
     qlogger.info("Done!")
-    qlogger.info("Connecting to local Syslog database...")
-    try:
-      #Create connection
-      db = mysqldb.connect(host, user, password, database)
-    except Exception as e:
-      qlogger.error(e)
-    if db:
-      qlogger.info("Successfully created database connection to %s!" % database)
-    qlogger.info("Creating cursor() object used to send statements to mysql...")
-    cursor = db.cursor()
-    qlogger.info("Done creating cursor() object!")
-    
-    qlogger.info("======Syslog() database initialization complete!======")
+
   #  
   #def connect(self):
   #  """Connect to local Syslog database and create a cursor object to allow queries"""
@@ -314,24 +302,45 @@ class SyslogDB():
   #  
   def find_Bans(self):
     """Execute SQL statements to interact with database"""
+    qlogger.info("Connecting to local Syslog database...")
+    try:
+      #Create connection
+      db = mysqldb.connect(self.host, self.user, self.password, self.database)
+    except Exception as e:
+      qlogger.error(e)
+    if db:
+      qlogger.info("Successfully created database connection to %s!" % self.database)
+    else:
+      qlogger.error("Possible error connecting to database.  Check credentials")
+    qlogger.info("Creating cursor() object used to send statements to mysql...")
+    cursor = db.cursor()
+    qlogger.info("Done creating cursor() object!")
+    qlogger.info("======Syslog() database initialization complete!======")
     statement = "select ID, DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %';"
     #This will find all messages from fail2ban that contain the string 'Ban'
     qlogger.info("Executing statement: \n%s" % statement)
     cursor.execute(statement)
     #To get row count of returned results
+    qlogger.info("Statement executed")
     cursor.rowcount       #<---read-only attribute
     ##To fetch a single row at a time
     #data = cursor.fetchone()
     #To fetch all rows at once into a tuple
+    qlogger.info("Parsing statement return value...")
     all_data = cursor.fetchall()
-    banned_IPs = {}
+    banned_IPs = []
     ip_pattern = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
     #findIP = re.findall(ipPattern,string)
     for row in all_data:
       string = row[3]    #<---this row contains the banned IP
       ip = re.findall(ip_pattern, string)
       banned_IPs.append(ip[0])
-    return banned_IPs
+    if banned_IPs:
+      qlogger.info("Found banned IP addresses!")
+    else:
+      qlogger.info("No new banned IP addresses!")
+    for ip in banned_IPs:
+      print ip
     
     
   def db_Close():
@@ -342,9 +351,9 @@ class SyslogDB():
 
 
 
-
-
-
+qlogger.info("Setting up database object")
+db_object = SyslogDB()
+db_object.find_Bans()
 
 
 
