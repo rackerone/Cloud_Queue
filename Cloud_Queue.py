@@ -23,6 +23,21 @@ $ curl -i -X PUT https://ord.queues.api.rackspacecloud.com/v1/queues/test_queue 
 RETURN VALUE=====>>>
 HTTP/1.1 201 CreatedContent-Length: 0
 Location: /v1/queues/test_queueu
+
+
+CONFIG FILE ---> you need to create a configuration file in named /etc/Cloud_Queue.conf.  The template is as follows:
+#cat /etc/Cloud_Queue.conf
+[rackspace_cloud]
+username = YOURUSERNAME
+api_key = YOURAPIKEY
+
+[database_credentials]
+db_syslog_user = 'XXXXXXX'
+db_sylog_user_password = 'XXXXXX'
+target_host = 'XXXXXX'
+Syslog_database = 'XXXXXX'
+
+
 """
 
 #Need to use this url to get logging working...need console output for diagnostics while writing code
@@ -54,12 +69,13 @@ FIRST_RUN = True  # <--Must execute as root when first run so that it can create
 #SET UP LOGGING
 #========================================================================================
 
-#Checking for the existence of the Cloud_Queue log file.  If it does not exist then leaving FIRST_RUN as True.
+#Checking for the existence of the Cloud_Queue log file and our conf file.  If they do not exist then leaving FIRST_RUN as True.
 if os.path.exists(LOG_FILE) and os.path.exists(CONFIG_FILE):
-  FIRST_RUN = False        # <---is log file exists then this is not first run
+  FIRST_RUN = False        # <---is log file and conf file exists then this is not first run
 
 #Verifying that we can open and write to log file
 f_log = ''    #<---initialze the file handle for our log file
+conf_file = '' #<---initialize the conf file variable
 
 try:
   f_log = open(LOG_FILE, "aw")
@@ -73,7 +89,7 @@ except IOError:
   if not f_log:
     print "Unable to open log file, '%s'.  Please check file permissions/ownership" % LOG_FILE
   if not conf_file:
-    print "Unable to open configuration file, %s.  Please check file permissions/ovnership" % CONFIG_FILE
+    print "Unable to open configuration file, %s.  Please check file permissions/ovnership.  Also check the top of this script for config format" % CONFIG_FILE
   sys.exit(1)
 finally:
   if f:
@@ -236,11 +252,11 @@ class Cloud_Queue():
     c.close()
 
 
-#CHANGE THIS LATER BY ADDING CONFIG FILE FOR THIS STUFF
-db_user = 'XXXXXXX'
-db_password = 'XXXXXX'
-target_host = 'localhost'
-Syslog_database = 'Syslog'
+##CHANGE THIS LATER BY ADDING CONFIG FILE FOR THIS STUFF
+#db_user = 'XXXXXXX'
+#db_password = 'XXXXXX'
+#target_host = 'localhost'
+#Syslog_database = 'Syslog'
 
 class SyslogDB():
   """Manage connections to local mysql syslog database.  When we create the SyslogDB object it will automatically authenticate so we are
