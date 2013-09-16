@@ -44,7 +44,7 @@ Syslog_database = 'XXXXXX'
 #--->  http://docs.python.org/dev/howto/logging.html
 
 import pycurl
-import pyrax
+#import pyrax
 import getpass
 import cStringIO
 import subprocess
@@ -159,12 +159,12 @@ for section in my_sections:
     except Exception as e:
       qlogger.error(e)
 qlogger.info('Done reading file, setting creds...')
-cloud_username = cred_dict['username']
-cloud_api_key = cred_dict['api_key']
-syslog_db_user = cred_dict['db_syslog_user']
-syslog_db_user_pwd = cred_dict['db_sylog_user_password']
-syslog_db_name = cred_dict['syslog_database']
-syslog_db_host = cred_dict['target_host']
+cloud_username = cred_dict['username'].strip("'")
+cloud_api_key = cred_dict['api_key'].strip("'")
+syslog_db_user = cred_dict['db_syslog_user'].strip("'")
+syslog_db_user_pwd = cred_dict['db_sylog_user_password'].strip("'")
+syslog_db_name = cred_dict['syslog_database'].strip("'")
+syslog_db_host = cred_dict['target_host'].strip("'")
 qlogger.info('Done!')
 qlogger.info('Username: %s' % cloud_username)
 qlogger.info('API Key: %s' % cloud_api_key)
@@ -176,38 +176,6 @@ if syslog_db_user_pwd:
 else:
   qlogger.error('Syslog DB password might not be set correctly')
 qlogger.info("Done processing local config file!")
-
-
-###my_config = ConfigParser.ConfigParser()
-###my_config.read(os.path.expanduser(CONFIG_FILE))
-###my_config.sections()
-###rackspace_config = my_config.sections()[1]
-###database_config = my_config.sections()[0]
-###
-###def ParseConfigSections(section):
-###  """Parse the '/etc/Cloud_Queue.conf' file and save username, api key, and database credentials"""
-###  cred_dict = {}
-###  options = my_config.options(section)
-###  for option in options:
-###    try:
-###      cred_dict[option] = my_config.get(section, option)
-###    except Exception as e:
-###      #qlogger.error(e)
-###      print e
-###  return cred_dict
-###
-###cloud_creds = ParseConfigSections(rackspace_config)
-###database_creds = ParseConfigSections(database_config)
-###
-###cloud_username = my_creds['username']
-###cloud_api_key = my_creds['api_key']
-###
-###qlogger.info('Username: %s' % cloud_username)
-###qlogger.info('API Key: %s' % cloud_api_key)
-###qlogger.info("Done processing local config file!")
-
-
-
 
 #========================================================================================
 # Authenticate to Rackspace cloud and retrieve API token:
@@ -224,10 +192,10 @@ hdr = cStringIO.StringIO()   #when we authenticate the information we require is
 c.setopt(c.WRITEFUNCTION, body.write)
 c.setopt(c.HEADERFUNCTION, hdr.write)
 c.setopt(c.URL, auth_url)
-c.setopt(c.HTTPHEADER, ["X-Auth-User:%s" % cloud_username, "X-Auth-Key:%s" % cloud_api_key])
+c.setopt(c.HTTPHEADER, ["X-Auth-User: %s" % cloud_username, "X-Auth-Key: %s" % cloud_api_key])
 c.setopt(c.CONNECTTIMEOUT, 5)
 c.setopt(c.TIMEOUT, 8)
-c.setopt(c.VERBOSE, False)
+c.setopt(c.VERBOSE, True)
 c.setopt(c.SSL_VERIFYPEER, False)
 c.setopt(c.FAILONERROR, True)
 c.perform()
@@ -308,10 +276,10 @@ class SyslogDB():
   """
   
   
-  def __init__(self, host=target_host, user=db_user, password=db_password, database=Syslog_database):
+  def __init__(self, host=syslog_db_host, user=db_user, password=db_password, database=Syslog_database):
     qlogger.info("======Initializing SyslogDB() object for mysql interface======")
     qlogger.info("Assembling arguments for our database object...")
-    self.host = target_host
+    self.host = syslog_db_host
     self.database = Syslog_database
     self.user = db_user
     self.password = db_password
