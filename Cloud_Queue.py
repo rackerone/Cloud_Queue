@@ -55,6 +55,11 @@ import sys
 import pwd      # <---import 'the password database' to get access to user/group id info
 import ConfigParser    # <----use to parse config file containing cloud credentials
 import MySQLdb as mysqldb
+try:
+  import cPickle as pickle  # <---for dev purposes...saving objects for offline dev work
+except:
+  import pickle
+import pprint   # <---also temp as of now for dev purposes
 
 #========================================================================================
 #SET UP GLOBAL VARIABLES
@@ -196,7 +201,7 @@ c.setopt(c.URL, auth_url)
 c.setopt(c.HTTPHEADER, ["X-Auth-User: %s" % cloud_username, "X-Auth-Key: %s" % cloud_api_key])
 c.setopt(c.CONNECTTIMEOUT, 5)
 c.setopt(c.TIMEOUT, 8)
-c.setopt(c.VERBOSE, True)
+c.setopt(c.VERBOSE, False)
 c.setopt(c.SSL_VERIFYPEER, False)
 c.setopt(c.FAILONERROR, True)
 c.perform()
@@ -240,7 +245,7 @@ class Cloud_Queue():
     hdr = cStringIO.StringIO()     # when we authenticate the information we require is returned in the header
     c.setopt(c.WRITEFUNCTION, body.write)
     c.setopt(c.HEADERFUNCTION, hdr.write)
-    c.setopt(c.URL, auth_url)
+    c.setopt(c.URL, self.auth_url)
     c.setopt(c.HTTPHEADER, ["X-Auth-User:%s" % self.username, "X-Auth-Key:%s" % self.api_key])
     c.setopt(c.CONNECTTIMEOUT, 5)
     c.setopt(c.TIMEOUT, 8)
@@ -287,9 +292,7 @@ class Cloud_Queue():
     c.setopt(c.HEADERFUNCTION, hdr.write)
     c.setopt(c.URL, (self.q_url + qname))
     c.setopt(pycurl.PUT, 1)
-    c.setopt(c.HTTPHEADER, auth_token_header)
-    c.setopt(c.HTTPHEADER, accept_header)
-    c.setopt(c.HTTPHEADER, content_type_header)
+    c.setopt(c.HTTPHEADER, [auth_token_header, accept_header, content_type_header])
     c.setopt(c.USERAGENT, useragent)
     c.setopt(c.CONNECTTIMEOUT, 5)
     c.setopt(c.TIMEOUT, 8)
@@ -317,8 +320,10 @@ class Cloud_Queue():
     
     HTTP/1.1 204 No Content
     Content-Location: /v1/queues/kidrack_queue
+    
+    THIS METHOD SUCCESSFULLY TESTED
     """
-    auth_token_header = "X-Auth-Token: %s" % self.api_token
+    auth_token_header = ["X-Auth-Token: %s" % self.api_token]
     useragent = "KidRack"
     
     c = pycurl.Curl()
@@ -674,5 +679,7 @@ class SyslogDB():
 qlogger.info("Setting up database object")
 db_object = SyslogDB()
 db_object.find_Bans()
+print ""
+print "listing queues"
 
 
