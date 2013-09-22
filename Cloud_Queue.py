@@ -51,6 +51,7 @@ import subprocess
 import logging
 import re
 import os
+import subprocess
 import sys
 import pwd      # <---import 'the password database' to get access to user/group id info
 import ConfigParser    # <----use to parse config file containing cloud credentials
@@ -205,6 +206,7 @@ c.setopt(c.VERBOSE, False)
 c.setopt(c.SSL_VERIFYPEER, False)
 c.setopt(c.FAILONERROR, True)
 c.perform()
+return_code = c.getinfo(pycurl.HTTP_CODE)
 hdr_response = hdr.getvalue()
 body_response = body.getvalue()
 
@@ -253,6 +255,7 @@ class Cloud_Queue():
     c.setopt(c.SSL_VERIFYPEER, False)
     c.setopt(c.FAILONERROR, True)
     c.perform()
+    return_code = c.getinfo(pycurl.HTTP_CODE)
     hdr_response = hdr.getvalue()
     body_response = body.getvalue()
     #print "status code: %s" % c.getinfo(pycurl.HTTP_CODE)
@@ -300,16 +303,20 @@ class Cloud_Queue():
     c.setopt(c.SSL_VERIFYPEER, False)
     c.setopt(c.FAILONERROR, True)
     c.perform()
-    
+    return_code = c.getinfo(pycurl.HTTP_CODE)
     hdr_response = hdr.getvalue()
-    body_response = body.getvalue()
+    #body_response = body.getvalue()  # <-- no body returned on queue creation
     
-    print "the HEADER:"
-    print hdr_response
-    print ""
-    print "The BODY:"
-    print body_response
-
+    #we expect to get a 204 no content return header
+    if return_code == 201:
+      qlogger.info("Queue named '%s' successfully created" % qname)
+    else:
+      qlogger.error("Unable to create queue!")
+      sys.exit(1)
+    return "Successfully created queue '%s'" % qname
+    body.close()
+    hdr.close()
+    c.close()
 
   def checkQueue(self, qname):
     """Use this to check for a queue's existence.  Good sanity check during script initialization to make sure our queue is visible before pumping
@@ -337,15 +344,11 @@ class Cloud_Queue():
     c.setopt(c.USERAGENT, useragent)
     c.setopt(c.HTTPHEADER, auth_token_header)
     c.perform()
-    
+    return_code = c.getinfo(pycurl.HTTP_CODE)
     hdr_response = hdr.getvalue()
     body_response = body.getvalue()
-    
-    print "the HEADER:"
-    print hdr_response
-    print ""
-    print "The BODY:"
-    print body_response
+    if return_code == 204:
+      qlogger.info("Queue Named '%s' DOES exist!" % qname)
     
     body.close()
     hdr.close()
@@ -379,14 +382,14 @@ class Cloud_Queue():
     c.setopt(c.USERAGENT, useragent)
     c.setopt(c.HTTPHEADER, auth_token_header)
     c.perform()
-    
+    return_code = c.getinfo(pycurl.HTTP_CODE)
     hdr_response = hdr.getvalue()
     body_response = body.getvalue()
-    
+    if return_code != 200:
+      qlogger.warning('Possible error.  HTTP response code on API all is NOT 200!')
     print "the HEADER:"
     print hdr_response
-    print ""
-    print "The BODY:"
+    print "BODY:"
     print body_response
     
     body.close()
@@ -394,10 +397,7 @@ class Cloud_Queue():
     c.close()
 
 
-
-
-
-  def sendMessage(self, qname, message, method='messages'):
+  def sendMessage(self, qname, message):
     """$ curl -i -X POST https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue/messages \
     -d '[{ "ttl": 300, "body": {"event": "First message sent"}}, {"ttl": 60, "body": {"event2": "This is my 2nd message"}}]' \
     -H "Content-type: application/json" \
@@ -420,47 +420,34 @@ class Cloud_Queue():
     qclient_header = "Client-ID: QClient"
     content_type_header = "Content-type: application/json"
     accept_header = "Accept: application/json"
-    auth_token_header = "X-Auth-Token: %s" % self.api_token
+    auth_token_header = "X-Auth-Token: %s" % cloud_api_token
     #q_url = "https://ord.queues.api.rackspacecloud.com/v1/queues/"
     payload_TTL = 300    # <--5 minutes
     #for test lests set a banned IP and try a message
-    banned_ip = '2.3.4.5'   # <---temporary
-    payload_BODY = "{'Banned IP': '%s', 'SyslogID': '%d'}" % (banned_ip, )
-    payload = "{'ttl': %s, 'body': %s, }" % (payload_TTL, payload_BODY)    # <--we can extend this payload with multiple messages
+    banned_ip = message   # <---temporary...this will provided by calling function as part of the 'message' parameter
+    syslog_id = '34534534'   # <--- this will provided by calling function as part of the 'message' parameter
+    payload_BODY = """{"Banned IP": "%s", "SyslogID": "%s"}""" % (banned_ip, syslog_id)
+    payload = """[{"ttl": %s, "body": %s}]""" % (payload_TTL, payload_BODY)    # <--we can extend this payload with multiple messages
     useragent = "KidRack"
-    
-    
-    c = pycurl.Curl()
-    body = cStringIO.StringIO()
-    hdr = cStringIO.StringIO()
-    c.setopt(c.WRITEFUNCTION, body.write)
-    c.setopt(c.HEADERFUNCTION, hdr.write)
-    c.setopt(pycurl.POST, 1)
-    c.setopt(c.URL, (self.q_url + qname + '/' + method))
-    c.setopt(c.VERBOSE,True)
-    c.setopt(c.SSL_VERIFYPEER, False)
-    c.setopt(c.USERAGENT, useragent)
-    c.setopt(c.HTTPHEADER, qclient_header)
-    c.setopt(c.HTTPHEADER, content_type_header)
-    c.setopt(c.HTTPHEADER, accept_header)
-    c.setopt(c.HTTPHEADER, auth_token_header)
-    c.setopt(c.POSTFIELDS, payload)
-    c.perform()
-
-    hdr_response = hdr.getvalue()
-    body_response = body.getvalue()
-    
-    print "the HEADER:"
-    print hdr_response
+    #myurl = q_url
+    myurl = 'https://ord.queues.api.rackspacecloud.com/v1/queues/%s/messages' % qname
+    print "this is the payload i would try to use:"
+    print payload
     print ""
-    print "The BODY:"
-    print body_response
-    
-    #need to parse the body response....
-    
-    body.close()
-    hdr.close()
-    c.close()
+    print "payload done:"
+    print ""
+    cmd = """(curl -i -X POST %s \
+    -d '%s' \
+    -H "Content-type: application/json" \
+    -H "Client-ID: QClient" \
+    -H "X-Auth-Token: %s" \
+    -H "Accept: application/json")
+    """ % (myurl, payload, cloud_api_token)
+    #% (send_message_url, payload, content_type_header, qclient_header, auth_token_header, accept_header)
+    subprocess.call(cmd, shell=True)
+
+
+
 
  
   def claimMessage(self, qname, method='claims'):
@@ -497,7 +484,7 @@ class Cloud_Queue():
     c.setopt(c.WRITEFUNCTION, body.write)
     c.setopt(c.HEADERFUNCTION, hdr.write)
     c.setopt(c.URL, (self.q_url + qname + '/' + method))
-    c.setopt(c.VERBOSE,True)
+    c.setopt(c.VERBOSE, False)
     c.setopt(pycurl.POST, 1)
     c.setopt(c.SSL_VERIFYPEER, False)
     c.setopt(c.USERAGENT, useragent)
@@ -507,7 +494,7 @@ class Cloud_Queue():
     c.setopt(c.HTTPHEADER, auth_token_header)
     c.setopt(c.POSTFIELDS, payload)
     c.perform()
-    
+    return_code = c.getinfo(pycurl.HTTP_CODE)
     hdr_response = hdr.getvalue()
     body_response = body.getvalue()
     
@@ -533,6 +520,9 @@ class Cloud_Queue():
     Content-Location: /v1/queues/kidrack_queue/stats
     
     {"messages": {"claimed": 0, "total": 0, "free": 0}}
+    
+    
+    TESTED SUCCESSFULLY
     """
     auth_token_header = "X-Auth-Token: %s" % self.api_token
     #q_url = "https://ord.queues.api.rackspacecloud.com/v1/queues/"  
@@ -544,12 +534,12 @@ class Cloud_Queue():
     c.setopt(c.WRITEFUNCTION, body.write)
     c.setopt(c.HEADERFUNCTION, hdr.write)
     c.setopt(c.URL, (self.q_url + qname + '/' + method))
-    c.setopt(c.VERBOSE,True)
+    c.setopt(c.VERBOSE,False)
     c.setopt(c.SSL_VERIFYPEER, False)
     c.setopt(c.USERAGENT, useragent)
-    c.setopt(c.HTTPHEADER, auth_token_header)
+    c.setopt(c.HTTPHEADER, [auth_token_header])
     c.perform()
-    
+    return_code = c.getinfo(pycurl.HTTP_CODE)
     hdr_response = hdr.getvalue()
     body_response = body.getvalue()
     
@@ -676,10 +666,14 @@ class SyslogDB():
 
 
 
-qlogger.info("Setting up database object")
-db_object = SyslogDB()
-db_object.find_Bans()
+# qlogger.info("Setting up database object")
+# db_object = SyslogDB()
+# db_object.find_Bans()
 print ""
 print "listing queues"
-
-
+cqueue = Cloud_Queue()
+cqueue.Auth()
+# cqueue.listQueues()
+# cqueue.checkStats('kidrack_queue')
+mymessage = '2.3.4.5'
+cqueue.sendMessage('kidrack_queue', mymessage)
