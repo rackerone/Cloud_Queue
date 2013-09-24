@@ -51,11 +51,16 @@ import subprocess
 import logging
 import re
 import os
+import json
 import subprocess
 import sys
 import pwd      # <---import 'the password database' to get access to user/group id info
 import ConfigParser    # <----use to parse config file containing cloud credentials
 import MySQLdb as mysqldb
+try:
+    import daemon
+except:
+    print "Please install python-daemon!.  \npip install python-daemon   \nOR   \neasy_install python-daemon"
 try:
   import cPickle as pickle  # <---for dev purposes...saving objects for offline dev work
 except:
@@ -110,10 +115,10 @@ finally:
 
 #Set up logging to file--->  remove the filemode ('w') to make the logs append to file rather than overwrite
 logging.basicConfig(level=logging.DEBUG,
-		    format='%(name)-12s:%(levelname)-8s:%(asctime)s %(message)s',
-		    datefmt='%m-%d %H:%M',
-		    filename=LOG_FILE,
-		    filemode='w')
+            format='%(name)-12s:%(levelname)-8s:%(asctime)s %(message)s',
+            datefmt='%m-%d %H:%M',
+            filename=LOG_FILE,
+            filemode='w')
 
 # define a 'console' Handler which writes to the console instead of a log file
 console = logging.StreamHandler()
@@ -270,7 +275,7 @@ class Cloud_Queue():
 
   def createQueue(self, qname):
     """Create a Cloud Queue.  We will be using a pub/sub model for our queue as opposed to a producer/consumer model
-    $ curl -i -X PUT https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue \
+    $ curl -i -X PUT https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUENAME \
     -d'{"TEST": "My Test Queue"}' \
     -H"Content-type: application/json" \
     -H"X-Auth-Token: MYAUTHTOKEN" \
@@ -278,14 +283,14 @@ class Cloud_Queue():
     
     HTTP/1.1 201 Created
     Content-Length: 0
-    Location: /v1/queues/kidrack_queue
+    Location: /v1/queues/NEWQUEUENAME
     """
     content_type_header = "Content-type: application/json"
     accept_header = "Accept: application/json"
     auth_token_header = "X-Auth-Token: %s" % self.api_token
     payload_TTL = 300    # <--5 minutes
     payload_BODY = "{'Creating Queue -> Name': %s}" % qname
-    payload = "['ttl': %s, 'body': %s]" % (payload_TTL, payload_BODY)
+    payload = "['ttl': %d, 'body': '%s']" % (payload_TTL, payload_BODY)
     useragent = "KidRack"
     
     c = pycurl.Curl()
@@ -322,11 +327,11 @@ class Cloud_Queue():
     """Use this to check for a queue's existence.  Good sanity check during script initialization to make sure our queue is visible before pumping
     messages to it.
     
-    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue \
+    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME\
     -H "X-Auth-Token: MYAUTHTOKEN"
     
     HTTP/1.1 204 No Content
-    Content-Location: /v1/queues/kidrack_queue
+    Content-Location: /v1/queues/NEWQUEUNAME
     
     THIS METHOD SUCCESSFULLY TESTED
     """
@@ -358,13 +363,13 @@ class Cloud_Queue():
   def listQueues(self):
     """
     Return a list of queueus currently available on this account.
-    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues -H "X-Auth-Token: 5436552e4064431b8d4f7d945ffd777b"
+    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues -H "X-Auth-Token: MyAPITOKEN"
     HTTP/1.1 200 OK
     Content-Length: 146
     Content-Type: application/json; charset=utf-8
     Content-Location: /v1/queues
     
-    {"queues": [{"href": "/v1/queues/kidrack_queue", "name": "kidrack_queue"}], "links": [{"href": "/v1/queues?marker=kidrack_queue", "rel": "next"}]}
+    {"queues": [{"href": "/v1/queues/NEWQUEUNAME", "name": "NEWQUEUNAME"}], "links": [{"href": "/v1/queues?marker=NEWQUEUNAME", "rel": "next"}]}
     
     TESTED THIS METHOD AND IT WORKS
     """
@@ -398,7 +403,7 @@ class Cloud_Queue():
 
 
   def sendMessage(self, qname, message):
-    """$ curl -i -X POST https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue/messages \
+    """$ curl -i -X POST https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/messages \
     -d '[{ "ttl": 300, "body": {"event": "First message sent"}}, {"ttl": 60, "body": {"event2": "This is my 2nd message"}}]' \
     -H "Content-type: application/json" \
     -H "Client-ID: QClient" \
@@ -408,9 +413,9 @@ class Cloud_Queue():
     HTTP/1.1 201 Created
     Content-Length: 157
     Content-Type: application/json; charset=utf-8
-    Location: /v1/queues/kidrack_queue/messages?ids=5228aa514513ce5976532dbb,5228aa514513ce5976532dbc      #<----Notice the 2 id's…FIFO--message 1 is id 1, etc
+    Location: /v1/queues/NEWQUEUNAME/messages?ids=5228aa514513ce5976532dbb,5228aa514513ce5976532dbc      #<----Notice the 2 id's…FIFO--message 1 is id 1, etc
 
-    {"partial": false, "resources": ["/v1/queues/kidrack_queue/messages/5228aa514513ce5976532dbb", "/v1/queues/kidrack_queue/messages/5228aa514513ce5976532dbc"]}
+    {"partial": false, "resources": ["/v1/queues/NEWQUEUNAME/messages/5228aa514513ce5976532dbb", "/v1/queues/NEWQUEUNAME/messages/5228aa514513ce5976532dbc"]}
     
     qname ::  This is the name of our queue where we are sending messages
     method ::  This is the portion of the URL endpoint just after the queue name.  Possible values ['messages', 'stats', 'claims'] but always
@@ -424,10 +429,10 @@ class Cloud_Queue():
     #q_url = "https://ord.queues.api.rackspacecloud.com/v1/queues/"
     payload_TTL = 300    # <--5 minutes
     #for test lests set a banned IP and try a message
-    banned_ip = message   # <---temporary...this will provided by calling function as part of the 'message' parameter
-    syslog_id = '34534534'   # <--- this will provided by calling function as part of the 'message' parameter
-    payload_BODY = """{"Banned IP": "%s", "SyslogID": "%s"}""" % (banned_ip, syslog_id)
-    payload = """[{"ttl": %s, "body": %s}]""" % (payload_TTL, payload_BODY)    # <--we can extend this payload with multiple messages
+    #banned_ip = message   # <---temporary...this will provided by calling function as part of the 'message' parameter
+    #syslog_id = '34534534'   # <--- this will provided by calling function as part of the 'message' parameter
+    #message = """{"Banned IP": "%s", "SyslogID": "%s"}""" % (banned_ip, syslog_id)  #this is returned from SyslogDB.fidnBan
+    payload = """[{"ttl": %d, "body": "%s"}]""" % (payload_TTL, message)    # <--we can extend this payload with multiple messages
     useragent = "KidRack"
     #myurl = q_url
     myurl = 'https://ord.queues.api.rackspacecloud.com/v1/queues/%s/messages' % qname
@@ -453,7 +458,7 @@ class Cloud_Queue():
   def claimMessage(self, qname, method='claims'):
     """Claim messages from {qname}
     
-    $ curl -i -X POST https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue/claims \
+    $ curl -i -X POST https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/claims \
     -d'{"ttl": 300, "grace": 300}' \
     -H "Content-Type: application/json" \
     -H "Client-ID: QClient" \
@@ -463,9 +468,9 @@ class Cloud_Queue():
     HTTP/1.1 201 Created
     Content-Length: 344
     Content-Type: application/json; charset=utf-8
-    Location: /v1/queues/kidrack_queue/claims/5228aa856f1ecd56dc002ef6
+    Location: /v1/queues/NEWQUEUNAME/claims/5228aa856f1ecd56dc002ef6
     
-    [{"body": {"event": "First message sent"}, "age": 52, "href": "/v1/queues/kidrack_queue/messages/5228aa514513ce5976532dbb?claim_id=5228aa856f1ecd56dc002ef6", "ttl": 300}, {"body": {"event2": "This is my 2nd message"}, "age": 52, "href": "/v1/queues/kidrack_queue/messages/5228aa514513ce5976532dbc?claim_id=5228aa856f1ecd56dc002ef6", "ttl": 60}]
+    [{"body": {"event": "First message sent"}, "age": 52, "href": "/v1/queues/NEWQUEUNAME/messages/5228aa514513ce5976532dbb?claim_id=5228aa856f1ecd56dc002ef6", "ttl": 300}, {"body": {"event2": "This is my 2nd message"}, "age": 52, "href": "/v1/queues/NEWQUEUNAME/messages/5228aa514513ce5976532dbc?claim_id=5228aa856f1ecd56dc002ef6", "ttl": 60}]
     """
     qclient_header = "Client-ID: QClient"
     content_type_header = "Content-type: application/json"
@@ -475,7 +480,7 @@ class Cloud_Queue():
     payload_TTL = 300    # <--5 minutes
     payload_GRACE = 300
     payload_BODY = "{'grace': %d}" % payload_GRACE
-    payload = "['ttl': %s, 'body': %s]" % (payload_TTL, payload_BODY)    # <--we can extend this payload with multiple messages
+    payload = "['ttl': %d, 'body': '%s']" % (payload_TTL, payload_BODY)    # <--we can extend this payload with multiple messages
     useragent = "KidRack"
     
     c = pycurl.Curl()
@@ -511,13 +516,13 @@ class Cloud_Queue():
 
   def checkStats(self, qname, method='stats'):
     """
-    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue/stats \
+    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/stats \
     -H "X-Auth-Token: MYAUTHTOKEN"
     
     HTTP/1.1 200 OK
     Content-Length: 51
     Content-Type: application/json; charset=utf-8
-    Content-Location: /v1/queues/kidrack_queue/stats
+    Content-Location: /v1/queues/NEWQUEUNAME/stats
     
     {"messages": {"claimed": 0, "total": 0, "free": 0}}
     
@@ -558,7 +563,7 @@ class Cloud_Queue():
     """
     GET /v1/queues/{queue_name}/messages{?marker,limit,echo,include_claimed}
     
-    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue/messages \
+    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/messages \
     -H "Client-ID: QClient" \
     -H "X-Auth-Token: MYAUTHTOKEN" \
     -H "Accept: application/json"
@@ -598,11 +603,8 @@ class SyslogDB():
   def find_Bans(self):
     """Execute SQL statements to interact with database"""
     qlogger.info("Connecting to local Syslog database...")
-    try:
-      #Create connection
-      db = mysqldb.connect(self.host, self.user, self.password, self.database)
-    except Exception as e:
-      qlogger.error(e)
+    #Create connection
+    db = mysqldb.connect(self.host, self.user, self.password, self.database)
     if db:
       qlogger.info("Successfully created database connection to %s!" % self.database)
     else:
@@ -611,7 +613,7 @@ class SyslogDB():
     cursor = db.cursor()
     qlogger.info("Done creating cursor() object!")
     qlogger.info("======Syslog() database initialization complete!======")
-    statement = "select ID, DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %';"
+    statement = "select ID,FromHost,DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %';"
     #This will find all messages from fail2ban that contain the string 'Ban'
     qlogger.info("Executing statement: %s" % statement)
     cursor.execute(statement)
@@ -624,56 +626,39 @@ class SyslogDB():
     qlogger.info("Parsing statement return value...")
     all_data = cursor.fetchall()
     #Set up a message that will eventually contain the syslog ID of the message and the banned IP
-    my_message = []
+    my_messages = []
     #construct and compile search pattern that will find IP addresses
     ip_pattern = re.compile('\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}')
-    #findIP = re.findall(ipPattern,string)
-    #banned_IPs = [re.findall(ip_pattern, row[3]) for row in all_data]
-    #syslog_IDs = [str(row[0]) for row in all_data]
-    #de-duplicate IP addresses
-    #if banned_IPs:
-    #  qlogger.info("Found banned IP addresses!")
-    #  #qlogger.info("Reducing banned IP list by removing duplicates...")
-    #  #IPs = [y[0] for y in banned_IPs]
-    #  #banned_IPs_filtered = list(set(IPs))
-    #  #qlogger.info("Done de-duplicating IP list!")
-    #else:
-    #  qlogger.info("No new banned IP addresses!")
-    print ""
-    #print "here are the banned ip addresses (de-duped)..."
-    #for ip in banned_IPs_filtered:
-    #  print ip
-    print ""
-    #print "here are the syslog IDs..."
-    #for syslog_id in syslog_IDs:
-    #  print syslog_id
-    print ""
-    banned_IPs = []
-    banned_IPs_filtered = []
     for row in all_data:
-      #create a banned_IPs list to keep track of IPs for de-duplication purposes
       syslog_id = str(row[0])
-      ip = re.findall(ip_pattern, row[3])
-      banned_IPs.append(ip)     #I NEED TO CHECK FOR THE EXISTENCE OF OUR CURRENT IP IN THE LIST...IF SO SKIP MESSAGE
-      if ip not in banned_IPs:
-        banned_IPs_filtered.append(ip[0])
-      my_message.append("{'syslogID':%s, 'bannedIP':%s}" % (syslog_id,ip[0]))
-    qlogger.info("Closing Database Connection...")
-    db.close()
-    qlogger.info("Database Connection Closed!")
-    print my_message
+      source_host = str(row[1])
+      ip = re.findall(ip_pattern, row[4])
+      #convert this msg to json data so we can access like a dictionary later
+      msg = json.loads('{"sourceHost": "%s", "syslogID": "%s", "bannedIP": "%s"}' % (source_host, syslog_id, ip[0]))
+      my_messages.append(msg)
+    return my_messages
 
-
-
-
-# qlogger.info("Setting up database object")
-# db_object = SyslogDB()
-# db_object.find_Bans()
+db_object = SyslogDB()
+bans = db_object.find_Bans()   # <--this returns a list of strings
+# print ""
+# print ""
+# for ban in bans:
+#     print ban
 print ""
-print "listing queues"
-cqueue = Cloud_Queue()
-cqueue.Auth()
-# cqueue.listQueues()
-# cqueue.checkStats('kidrack_queue')
-mymessage = '2.3.4.5'
-cqueue.sendMessage('kidrack_queue', mymessage)
+print ""
+send_IPs_to_queue = [i['bannedIP'] for i in bans]
+send_IPs_to_queue = set(send_IPs_to_queue)
+for ip in send_IPs_to_queue:
+    print ip
+
+
+
+
+# bans = [json.loads(ban) for ban in bans]  # <--we are converting the list of strings to a list of dictionaries
+# print ""
+# print ""
+# #print bans
+# print ""
+# for ban in bans:
+#     print ban
+
