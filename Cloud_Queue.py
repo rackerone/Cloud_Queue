@@ -75,7 +75,7 @@ CONFIG_FILE = "/etc/Cloud_Queue.conf"
 CREDS_FILE = "~/.rackspace_cloud_credentials"
 LOG_FILE = '/var/log/Cloud_Queue.log'    # <--application log file
 FIRST_RUN = True  # <--Must execute as root when first run so that it can create proper log files.  Assuming 'first-run' before check is done
-
+F2BDB = 'f2b'
 #========================================================================================
 #SET UP LOGGING
 #========================================================================================
@@ -427,7 +427,7 @@ class Cloud_Queue():
     accept_header = "Accept: application/json"
     auth_token_header = "X-Auth-Token: %s" % cloud_api_token
     #q_url = "https://ord.queues.api.rackspacecloud.com/v1/queues/"
-    payload_TTL = 300    # <--5 minutes
+    payload_TTL = 60    # <--5 minutes
     #for test lests set a banned IP and try a message
     #banned_ip = message   # <---temporary...this will provided by calling function as part of the 'message' parameter
     #syslog_id = '34534534'   # <--- this will provided by calling function as part of the 'message' parameter
@@ -589,11 +589,11 @@ class SyslogDB():
   http://www.tutorialspoint.com/python/python_database_access.htm
   """
   
-  def __init__(self, host=syslog_db_host, user=syslog_db_user, password=syslog_db_user_pwd, database=syslog_db_name):
+  def __init__(self, database, host=syslog_db_host, user=syslog_db_user, password=syslog_db_user_pwd):
     qlogger.info("======Initializing SyslogDB() object for mysql interface======")
     qlogger.info("Assembling arguments for our database object...")
     self.host = syslog_db_host
-    self.database = syslog_db_name
+    self.database = database
     self.user = syslog_db_user
     self.password = syslog_db_user_pwd
     qlogger.info("Done!")
@@ -601,7 +601,7 @@ class SyslogDB():
 
 
   def find_Bans(self):
-    """Execute SQL statements to interact with database"""
+    """Execute SQL statements to interact with database and find banned IP addresses"""
     qlogger.info("Connecting to local Syslog database...")
     #Create connection
     db = mysqldb.connect(self.host, self.user, self.password, self.database)
@@ -636,29 +636,60 @@ class SyslogDB():
       #convert this msg to json data so we can access like a dictionary later
       msg = json.loads('{"sourceHost": "%s", "syslogID": "%s", "bannedIP": "%s"}' % (source_host, syslog_id, ip[0]))
       my_messages.append(msg)
+    db.close()
     return my_messages
 
-db_object = SyslogDB()
-bans = db_object.find_Bans()   # <--this returns a list of strings
+  def archiveMessage(self, statement):
+    """We need to update our f2b database with the sent message.  This will allow us to mine this data
+    for the last syslogID processed, and subsequently only send unprocessed messages to the queue
+    """
+    qlogger.info("Connecting to local Syslog database...")
+    #Create connection
+    db = mysqldb.connect(self.host, self.user, self.password, self.database)
+    if db:
+      qlogger.info("Successfully created database connection to %s!" % self.database)
+    else:
+      qlogger.error("Possible error connecting to database.  Check credentials")
+    qlogger.info("Creating cursor() object used to send statements to mysql...")
+    cursor = db.cursor()
+    qlogger.info("Done creating cursor() object!")
+    qlogger.info("======Syslog() database initialization complete!======")
+    qlogger.info("Executing statement: %s" % statement)
+    cursor.execute(statement)
+    #To get row count of returned results
+    qlogger.info("Statement executed")
+    cursor.rowcount       #<---read-only attribute
+    ##To fetch a single row at a time
+    #data = cursor.fetchone()
+    #To fetch all rows at once into tuples
+    #qlogger.info("Parsing statement return value...")
+    all_data = cursor.fetchall()
+
+
+
+
+
+syslog_db_object = SyslogDB(syslog_db_name)
+qmessages = syslog_db_object.find_Bans()   # <--this returns a list of strings
 # print ""
 # print ""
-# for ban in bans:
-#     print ban
+f2b_db_object = SyslogDB(F2BDB)
+for ban in qmessages:
+    #insert each 'ban' message into our f2b database to track syslogIDs
+    msg = "INSERT INTO archived_messages (host, syslogid, bannedIP) VALUES ('%s', '%s', '%s');" % (ban['sourceHost'], ban['syslogID'], ban['bannedIP'])
+    f2b_db_object.archiveMessage(msg)
 print ""
 print ""
-send_IPs_to_queue = [i['bannedIP'] for i in bans]
-send_IPs_to_queue = set(send_IPs_to_queue)
-for ip in send_IPs_to_queue:
-    print ip
+for ban in qmessages:
+    print ban
+
+send_IPs_to_queue = [i['bannedIP'] for i in qmessages]
+send_IPs_to_queue = set(send_IPs_to_queue)  # <-- de-duplicate the list of IP addresses using 'set'
+# for ip in send_IPs_to_queue:
+#     print ip
 
 
+q = Cloud_Queue()
 
 
-# bans = [json.loads(ban) for ban in bans]  # <--we are converting the list of strings to a list of dictionaries
-# print ""
-# print ""
-# #print bans
-# print ""
-# for ban in bans:
-#     print ban
 
