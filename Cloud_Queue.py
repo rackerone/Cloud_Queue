@@ -600,7 +600,7 @@ class SyslogDB():
 
 
 
-  def find_Bans(self):
+  def find_Bans(self, syslogID=0):
     """Execute SQL statements to interact with database and find banned IP addresses"""
     qlogger.info("Connecting to local Syslog database...")
     #Create connection
@@ -613,7 +613,10 @@ class SyslogDB():
     cursor = db.cursor()
     qlogger.info("Done creating cursor() object!")
     qlogger.info("======Syslog() database initialization complete!======")
-    statement = "select ID,FromHost,DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %';"
+    if syslogID:
+      statement = "select ID,FromHost,DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%%' and Message like '%% Ban %%' and ID > %s;" % syslogID
+    else:
+      statement = "select ID,FromHost,DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%%' and Message like '%% Ban %%';" 
     #This will find all messages from fail2ban that contain the string 'Ban'
     qlogger.info("Executing statement: %s" % statement)
     cursor.execute(statement)
@@ -638,6 +641,28 @@ class SyslogDB():
       my_messages.append(msg)
     db.close()
     return my_messages
+ 
+  def getLastID(self):
+    """Get the last syslogID in the list and archive this.  It will be the starting point of subsequent queries"""
+    qlogger.info("Connecting to local Syslog database...")
+    #Create connection
+    db = mysqldb.connect(self.host, self.user, self.password, self.database)
+    if db:
+      qlogger.info("Successfully created database connection to %s!" % self.database)
+    else:
+      qlogger.error("Possible error connecting to database.  Check credentials")
+    qlogger.info("Creating cursor() object used to send statements to mysql...")
+    cursor = db.cursor()
+    qlogger.info("Done creating cursor() object!")
+    qlogger.info("======Syslog() database initialization complete!======")
+    statement = "select ID,FromHost,DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %' order by ID DESC;"
+    #This will find all messages from fail2ban that contain the string 'Ban'
+    qlogger.info("Executing statement: %s" % statement)
+    cursor.execute(statement)
+    #To get row count of returned results
+    qlogger.info("Statement executed")
+    last_record = cursor.fetchone()
+    return last_record[0]
 
   def archiveMessage(self, statement):
     """We need to update our f2b database with the sent message.  This will allow us to mine this data
@@ -664,20 +689,39 @@ class SyslogDB():
     #To fetch all rows at once into tuples
     #qlogger.info("Parsing statement return value...")
     all_data = cursor.fetchall()
+    db.close()
 
 
 
 
 
+#========================================================================================
+# LOGIC
+#========================================================================================
+
+#Create a connection to the f2b database
+f2b_db_object = SyslogDB(F2BDB)
+#Create a connection to the Syslog database
 syslog_db_object = SyslogDB(syslog_db_name)
+
+#Find the last syslogID that was processed and save it
+last_syslogID = syslog_db_object.getLastID()
+print last_syslogID
+
+#Find all the banned IP addresses
+
+#Return all messages unless syslogID provided to find_Bans() method
 qmessages = syslog_db_object.find_Bans()   # <--this returns a list of strings
 # print ""
 # print ""
-f2b_db_object = SyslogDB(F2BDB)
-for ban in qmessages:
-    #insert each 'ban' message into our f2b database to track syslogIDs
-    msg = "INSERT INTO archived_messages (host, syslogid, bannedIP) VALUES ('%s', '%s', '%s');" % (ban['sourceHost'], ban['syslogID'], ban['bannedIP'])
-    f2b_db_object.archiveMessage(msg)
+
+# #add banned ip address messages to f2b database
+# for ban in qmessages:
+#     #insert each 'ban' message into our f2b database to track syslogIDs
+#     msg = "INSERT INTO archived_messages (host, syslogid, bannedIP) VALUES ('%s', '%s', '%s');" % (ban['sourceHost'], ban['syslogID'], ban['bannedIP'])
+#     f2b_db_object.archiveMessage(msg)
+
+
 print ""
 print ""
 for ban in qmessages:
