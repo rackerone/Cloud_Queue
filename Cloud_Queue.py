@@ -354,7 +354,7 @@ class Cloud_Queue():
     body_response = body.getvalue()
     if return_code == 204:
       qlogger.info("Queue Named '%s' DOES exist!" % qname)
-    
+      return qname
     body.close()
     hdr.close()
     c.close()
@@ -392,14 +392,20 @@ class Cloud_Queue():
     body_response = body.getvalue()
     if return_code != 200:
       qlogger.warning('Possible error.  HTTP response code on API all is NOT 200!')
-    print "the HEADER:"
-    print hdr_response
-    print "BODY:"
-    print body_response
-    
+    # print "the HEADER:"
+    # print hdr_response
+    # print "BODY:"
+    #create a list of queue names
+    my_queues = json.loads(body_response)
+    q_list = []
+    for q in my_queues['queues']:
+      # path = q['href']
+      # q_list.append(os.path.basename(path))
+      q_list.append(q['name'])
     body.close()
     hdr.close()
     c.close()
+    return q_list
 
 
   def sendMessage(self, qname, message):
@@ -559,20 +565,36 @@ class Cloud_Queue():
     c.close()
 
 
-  def listMessages():
+  def listMessages(self, qname, message_id):
     """
-    GET /v1/queues/{queue_name}/messages{?marker,limit,echo,include_claimed}
+    GET /v1/queues/{queue_name}/messages/{messageID}{?marker,limit,echo,include_claimed}
     
-    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/messages \
+    curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/messages/{message ID} \
     -H "Client-ID: QClient" \
     -H "X-Auth-Token: MYAUTHTOKEN" \
     -H "Accept: application/json"
     
-    
     HAVING PROBLEMS LISTING MESSAGES!!!!!!
     """
-    pass
-
+    auth_token_header = ["X-Auth-Token: %s" % self.api_token]
+    useragent = "KidRack"
+    
+    c = pycurl.Curl()
+    body = cStringIO.StringIO()
+    hdr = cStringIO.StringIO()
+    c.setopt(c.WRITEFUNCTION, body.write)
+    c.setopt(c.HEADERFUNCTION, hdr.write)
+    c.setopt(c.URL, q_url + qname + '/messages/' + message_id)
+    c.setopt(c.VERBOSE, False)
+    c.setopt(c.SSL_VERIFYPEER, False)
+    c.setopt(c.USERAGENT, useragent)
+    c.setopt(c.HTTPHEADER, auth_token_header)
+    c.perform()
+    return_code = c.getinfo(pycurl.HTTP_CODE)
+    hdr_response = hdr.getvalue()
+    body_response = body.getvalue()
+    return body_response
+    #print q_url + qname + '/messages/' + message_id
 
 
 
@@ -644,22 +666,18 @@ class SyslogDB():
  
   def getLastID(self):
     """Get the last syslogID in the list and archive this.  It will be the starting point of subsequent queries"""
-    qlogger.info("Connecting to local Syslog database...")
     #Create connection
     db = mysqldb.connect(self.host, self.user, self.password, self.database)
     if db:
       qlogger.info("Successfully created database connection to %s!" % self.database)
     else:
       qlogger.error("Possible error connecting to database.  Check credentials")
-    qlogger.info("Creating cursor() object used to send statements to mysql...")
     cursor = db.cursor()
-    qlogger.info("Done creating cursor() object!")
-    qlogger.info("======Syslog() database initialization complete!======")
-    statement = "select ID,FromHost,DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %' order by ID DESC;"
+    #statement = "select ID,FromHost,DeviceReportedTime,SyslogTag,Message from SystemEvents where SysLogTag like 'fail2ban%' and Message like '% Ban %' order by ID DESC;"
+    statement = "select syslogid from f2b.archived_messages order by syslogid desc;"
     #This will find all messages from fail2ban that contain the string 'Ban'
     qlogger.info("Executing statement: %s" % statement)
     cursor.execute(statement)
-    #To get row count of returned results
     qlogger.info("Statement executed")
     last_record = cursor.fetchone()
     return last_record[0]
@@ -704,36 +722,36 @@ f2b_db_object = SyslogDB(F2BDB)
 #Create a connection to the Syslog database
 syslog_db_object = SyslogDB(syslog_db_name)
 
-#Find the last syslogID that was processed and save it
-last_syslogID = syslog_db_object.getLastID()
+#Find the last syslogID that was processed and save it.  This will come from the f2b database.  If this is the first run
+#and there isn't any table data yet then it will return a TypeError when trying to getLastID() in which case we just 
+#set the last_syslogID to 0.  Setting last_syslogID to 0 will enable a full list of banned messages.
+try:
+    last_syslogID = f2b_db_object.getLastID()
+except TypeError:
+    last_syslogID = 0
 print last_syslogID
 
-#Find all the banned IP addresses
+#Return all ban messages with a syslog ID greater that last_syslogID
+qmessages = syslog_db_object.find_Bans(last_syslogID)   # <--this returns a list of strings
+#print qmessages
 
-#Return all messages unless syslogID provided to find_Bans() method
-qmessages = syslog_db_object.find_Bans()   # <--this returns a list of strings
-# print ""
-# print ""
-
-# #add banned ip address messages to f2b database
-# for ban in qmessages:
-#     #insert each 'ban' message into our f2b database to track syslogIDs
-#     msg = "INSERT INTO archived_messages (host, syslogid, bannedIP) VALUES ('%s', '%s', '%s');" % (ban['sourceHost'], ban['syslogID'], ban['bannedIP'])
-#     f2b_db_object.archiveMessage(msg)
-
-
-print ""
-print ""
+#Add banned ip address messages to f2b database
 for ban in qmessages:
-    print ban
+    #insert each 'ban' message into our f2b database to track syslogIDs
+    msg = "INSERT INTO archived_messages (host, syslogid, bannedIP) VALUES ('%s', '%s', '%s');" % (ban['sourceHost'], ban['syslogID'], ban['bannedIP'])
+    #f2b_db_object.archiveMessage(msg)    # <---insert message into f2b database
+    #print msg
 
+#Create list of IP addresses from the message list, then de-duplicate this list
 send_IPs_to_queue = [i['bannedIP'] for i in qmessages]
 send_IPs_to_queue = set(send_IPs_to_queue)  # <-- de-duplicate the list of IP addresses using 'set'
-# for ip in send_IPs_to_queue:
-#     print ip
 
-
-q = Cloud_Queue()
-
+#Create a connection to cloud queue
+cq_conn = Cloud_Queue()
+print ""
+#print cq_conn.listQueues()
+print ""
+print cq_conn.listMessages('kidrack_queue', '524231f453273d7bb255301c')
+print ""
 
 
