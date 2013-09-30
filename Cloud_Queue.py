@@ -14,6 +14,7 @@
 #See the License for the specific language governing permissions and
 #limitations under the License.
 
+#This written using example taken from: http://developer.rackspace.com/blog/openstack-marconi-api.html.
 """
 CREATING QUEUE
 $ curl -i -X PUT https://ord.queues.api.rackspacecloud.com/v1/queues/test_queue -d'{"TestName": "My Test Queue Desctiption"}' \
@@ -43,29 +44,29 @@ Syslog_database = 'XXXXXX'
 #Need to use this url to get logging working...need console output for diagnostics while writing code
 #--->  http://docs.python.org/dev/howto/logging.html
 
-import pycurl
+import requests
+import json
 #import pyrax
 import getpass
+import pycurl
 import cStringIO
 import subprocess
 import logging
 import re
 import os
 import json
+import requests
 import subprocess
+import argparse
 import sys
 import pwd      # <---import 'the password database' to get access to user/group id info
 import ConfigParser    # <----use to parse config file containing cloud credentials
 import MySQLdb as mysqldb
-try:
-    import daemon
-except:
-    print "Please install python-daemon!.  \npip install python-daemon   \nOR   \neasy_install python-daemon"
-try:
-  import cPickle as pickle  # <---for dev purposes...saving objects for offline dev work
-except:
-  import pickle
-import pprint   # <---also temp as of now for dev purposes
+from time import sleep
+
+# username = 'my-user'
+# apikey = 'my-api-key'
+# url = 'https://test.my-marconi-server.com:443'
 
 #========================================================================================
 #SET UP GLOBAL VARIABLES
@@ -76,6 +77,7 @@ CREDS_FILE = "~/.rackspace_cloud_credentials"
 LOG_FILE = '/var/log/Cloud_Queue.log'    # <--application log file
 FIRST_RUN = True  # <--Must execute as root when first run so that it can create proper log files.  Assuming 'first-run' before check is done
 F2BDB = 'f2b'
+
 #========================================================================================
 #SET UP LOGGING
 #========================================================================================
@@ -228,376 +230,8 @@ c.close()
 # SET UP CLASSES
 #========================================================================================
 
-q_url = 'https://ord.queues.api.rackspacecloud.com/v1/queues/'
-
-class Cloud_Queue():
-  """Rackspace Cloud Queue"""
-  def __init__(self):
-    self.q_url = q_url
-    self.auth_url = auth_url
-    self.username = cloud_username
-    self.api_key = cloud_api_key
-    self.api_token = cloud_api_token
-    #self.queue_name = queue_name
-
-  def Auth(self):
-    """
-    curl -D - -H"X-Auth-User: MYUSERNAME" -H"X-Auth-Key:MYAUTHKEY" https://auth.api.rackspacecloud.com/v1.0
-    This method works but it will not save the buffer output for parsing.  Prob variable scope issue....?/
-    
-    TESTED THIS METHOD SUCCESSFULLY!
-    """
-    c = pycurl.Curl()
-    body = cStringIO.StringIO()
-    hdr = cStringIO.StringIO()     # when we authenticate the information we require is returned in the header
-    c.setopt(c.WRITEFUNCTION, body.write)
-    c.setopt(c.HEADERFUNCTION, hdr.write)
-    c.setopt(c.URL, self.auth_url)
-    c.setopt(c.HTTPHEADER, ["X-Auth-User:%s" % self.username, "X-Auth-Key:%s" % self.api_key])
-    c.setopt(c.CONNECTTIMEOUT, 5)
-    c.setopt(c.TIMEOUT, 8)
-    c.setopt(c.VERBOSE, False)
-    c.setopt(c.SSL_VERIFYPEER, False)
-    c.setopt(c.FAILONERROR, True)
-    c.perform()
-    return_code = c.getinfo(pycurl.HTTP_CODE)
-    hdr_response = hdr.getvalue()
-    body_response = body.getvalue()
-    #print "status code: %s" % c.getinfo(pycurl.HTTP_CODE)
-    #print "effective URL: %s" % c.getinfo(pycurl.EFFECTIVE_URL)
-    token_line = hdr_response.splitlines()[8]  #<--This line contains the api token
-    cloud_api_token = token_line.split(":")[1].strip()
-    qlogger.info("Retrieved API Token: %s" % cloud_api_token)
-    return cloud_api_token
-    c.close()
-    hdr.close()
-    body.close()
-
-  def createQueue(self, qname):
-    """Create a Cloud Queue.  We will be using a pub/sub model for our queue as opposed to a producer/consumer model
-    $ curl -i -X PUT https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUENAME \
-    -d'{"TEST": "My Test Queue"}' \
-    -H"Content-type: application/json" \
-    -H"X-Auth-Token: MYAUTHTOKEN" \
-    -H "Accept: application/json"
-    
-    HTTP/1.1 201 Created
-    Content-Length: 0
-    Location: /v1/queues/NEWQUEUENAME
-    """
-    content_type_header = "Content-type: application/json"
-    accept_header = "Accept: application/json"
-    auth_token_header = "X-Auth-Token: %s" % self.api_token
-    payload_TTL = 300    # <--5 minutes
-    payload_BODY = "{'Creating Queue -> Name': %s}" % qname
-    payload = "['ttl': %d, 'body': '%s']" % (payload_TTL, payload_BODY)
-    useragent = "KidRack"
-    
-    c = pycurl.Curl()
-    body = cStringIO.StringIO()
-    hdr = cStringIO.StringIO()     # when we authenticate the information we require is returned in the header
-    c.setopt(c.WRITEFUNCTION, body.write)
-    c.setopt(c.HEADERFUNCTION, hdr.write)
-    c.setopt(c.URL, (self.q_url + qname))
-    c.setopt(pycurl.PUT, 1)
-    c.setopt(c.HTTPHEADER, [auth_token_header, accept_header, content_type_header])
-    c.setopt(c.USERAGENT, useragent)
-    c.setopt(c.CONNECTTIMEOUT, 5)
-    c.setopt(c.TIMEOUT, 8)
-    c.setopt(c.VERBOSE, False)
-    c.setopt(c.SSL_VERIFYPEER, False)
-    c.setopt(c.FAILONERROR, True)
-    c.perform()
-    return_code = c.getinfo(pycurl.HTTP_CODE)
-    hdr_response = hdr.getvalue()
-    #body_response = body.getvalue()  # <-- no body returned on queue creation
-    
-    #we expect to get a 204 no content return header
-    if return_code == 201:
-      qlogger.info("Queue named '%s' successfully created" % qname)
-    else:
-      qlogger.error("Unable to create queue!")
-      sys.exit(1)
-    return "Successfully created queue '%s'" % qname
-    body.close()
-    hdr.close()
-    c.close()
-
-  def checkQueue(self, qname):
-    """Use this to check for a queue's existence.  Good sanity check during script initialization to make sure our queue is visible before pumping
-    messages to it.
-    
-    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME\
-    -H "X-Auth-Token: MYAUTHTOKEN"
-    
-    HTTP/1.1 204 No Content
-    Content-Location: /v1/queues/NEWQUEUNAME
-    
-    THIS METHOD SUCCESSFULLY TESTED
-    """
-    auth_token_header = ["X-Auth-Token: %s" % self.api_token]
-    useragent = "KidRack"
-    
-    c = pycurl.Curl()
-    body = cStringIO.StringIO()
-    hdr = cStringIO.StringIO()
-    c.setopt(c.WRITEFUNCTION, body.write)
-    c.setopt(c.HEADERFUNCTION, hdr.write)
-    c.setopt(c.URL, (self.q_url + qname))
-    c.setopt(c.VERBOSE,False)
-    c.setopt(c.SSL_VERIFYPEER, False)
-    c.setopt(c.USERAGENT, useragent)
-    c.setopt(c.HTTPHEADER, auth_token_header)
-    c.perform()
-    return_code = c.getinfo(pycurl.HTTP_CODE)
-    hdr_response = hdr.getvalue()
-    body_response = body.getvalue()
-    if return_code == 204:
-      qlogger.info("Queue Named '%s' DOES exist!" % qname)
-      return qname
-    body.close()
-    hdr.close()
-    c.close()
-
-
-  def listQueues(self):
-    """
-    Return a list of queueus currently available on this account.
-    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues -H "X-Auth-Token: MyAPITOKEN"
-    HTTP/1.1 200 OK
-    Content-Length: 146
-    Content-Type: application/json; charset=utf-8
-    Content-Location: /v1/queues
-    
-    {"queues": [{"href": "/v1/queues/NEWQUEUNAME", "name": "NEWQUEUNAME"}], "links": [{"href": "/v1/queues?marker=NEWQUEUNAME", "rel": "next"}]}
-    
-    TESTED THIS METHOD AND IT WORKS
-    """
-    auth_token_header = ["X-Auth-Token: %s" % self.api_token]
-    useragent = "KidRack"
-    
-    c = pycurl.Curl()
-    body = cStringIO.StringIO()
-    hdr = cStringIO.StringIO()
-    c.setopt(c.WRITEFUNCTION, body.write)
-    c.setopt(c.HEADERFUNCTION, hdr.write)
-    c.setopt(c.URL, q_url)
-    c.setopt(c.VERBOSE, False)
-    c.setopt(c.SSL_VERIFYPEER, False)
-    c.setopt(c.USERAGENT, useragent)
-    c.setopt(c.HTTPHEADER, auth_token_header)
-    c.perform()
-    return_code = c.getinfo(pycurl.HTTP_CODE)
-    hdr_response = hdr.getvalue()
-    body_response = body.getvalue()
-    if return_code != 200:
-      qlogger.warning('Possible error.  HTTP response code on API all is NOT 200!')
-    # print "the HEADER:"
-    # print hdr_response
-    # print "BODY:"
-    #create a list of queue names
-    my_queues = json.loads(body_response)
-    q_list = []
-    for q in my_queues['queues']:
-      # path = q['href']
-      # q_list.append(os.path.basename(path))
-      q_list.append(q['name'])
-    body.close()
-    hdr.close()
-    c.close()
-    return q_list
-
-
-  def sendMessage(self, qname, message):
-    """$ curl -i -X POST https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/messages \
-    -d '[{ "ttl": 300, "body": {"event": "First message sent"}}, {"ttl": 60, "body": {"event2": "This is my 2nd message"}}]' \
-    -H "Content-type: application/json" \
-    -H "Client-ID: QClient" \
-    -H "X-Auth-Token: MYAUTHTOKEN" \
-    -H "Accept: application/json"
-    
-    HTTP/1.1 201 Created
-    Content-Length: 157
-    Content-Type: application/json; charset=utf-8
-    Location: /v1/queues/NEWQUEUNAME/messages?ids=5228aa514513ce5976532dbb,5228aa514513ce5976532dbc      #<----Notice the 2 id's…FIFO--message 1 is id 1, etc
-
-    {"partial": false, "resources": ["/v1/queues/NEWQUEUNAME/messages/5228aa514513ce5976532dbb", "/v1/queues/NEWQUEUNAME/messages/5228aa514513ce5976532dbc"]}
-    
-    qname ::  This is the name of our queue where we are sending messages
-    method ::  This is the portion of the URL endpoint just after the queue name.  Possible values ['messages', 'stats', 'claims'] but always
-              'messages' for this function
-    message :: This is the message we want to broadcast on the queue.  We are just supplying an IP address as the message
-    """
-    qclient_header = "Client-ID: QClient"
-    content_type_header = "Content-type: application/json"
-    accept_header = "Accept: application/json"
-    auth_token_header = "X-Auth-Token: %s" % cloud_api_token
-    #q_url = "https://ord.queues.api.rackspacecloud.com/v1/queues/"
-    payload_TTL = 60    # <--5 minutes
-    #for test lests set a banned IP and try a message
-    #banned_ip = message   # <---temporary...this will provided by calling function as part of the 'message' parameter
-    #syslog_id = '34534534'   # <--- this will provided by calling function as part of the 'message' parameter
-    #message = """{"Banned IP": "%s", "SyslogID": "%s"}""" % (banned_ip, syslog_id)  #this is returned from SyslogDB.fidnBan
-    payload = """[{"ttl": %d, "body": "%s"}]""" % (payload_TTL, message)    # <--we can extend this payload with multiple messages
-    useragent = "KidRack"
-    #myurl = q_url
-    myurl = 'https://ord.queues.api.rackspacecloud.com/v1/queues/%s/messages' % qname
-    print "this is the payload i would try to use:"
-    print payload
-    print ""
-    print "payload done:"
-    print ""
-    cmd = """(curl -i -X POST %s \
-    -d '%s' \
-    -H "Content-type: application/json" \
-    -H "Client-ID: QClient" \
-    -H "X-Auth-Token: %s" \
-    -H "Accept: application/json")
-    """ % (myurl, payload, cloud_api_token)
-    #% (send_message_url, payload, content_type_header, qclient_header, auth_token_header, accept_header)
-    subprocess.call(cmd, shell=True)
-
-
-
-
- 
-  def claimMessage(self, qname, method='claims'):
-    """Claim messages from {qname}
-    
-    $ curl -i -X POST https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/claims \
-    -d'{"ttl": 300, "grace": 300}' \
-    -H "Content-Type: application/json" \
-    -H "Client-ID: QClient" \
-    -H "X-Auth-Token: MYAUTHTOKEN" \
-    -H "Accept: application/json"
-    
-    HTTP/1.1 201 Created
-    Content-Length: 344
-    Content-Type: application/json; charset=utf-8
-    Location: /v1/queues/NEWQUEUNAME/claims/5228aa856f1ecd56dc002ef6
-    
-    [{"body": {"event": "First message sent"}, "age": 52, "href": "/v1/queues/NEWQUEUNAME/messages/5228aa514513ce5976532dbb?claim_id=5228aa856f1ecd56dc002ef6", "ttl": 300}, {"body": {"event2": "This is my 2nd message"}, "age": 52, "href": "/v1/queues/NEWQUEUNAME/messages/5228aa514513ce5976532dbc?claim_id=5228aa856f1ecd56dc002ef6", "ttl": 60}]
-    """
-    qclient_header = "Client-ID: QClient"
-    content_type_header = "Content-type: application/json"
-    accept_header = "Accept: application/json"
-    auth_token_header = "X-Auth-Token: %s" % self.api_token
-    #q_url = "https://ord.queues.api.rackspacecloud.com/v1/queues/"
-    payload_TTL = 300    # <--5 minutes
-    payload_GRACE = 300
-    payload_BODY = "{'grace': %d}" % payload_GRACE
-    payload = "['ttl': %d, 'body': '%s']" % (payload_TTL, payload_BODY)    # <--we can extend this payload with multiple messages
-    useragent = "KidRack"
-    
-    c = pycurl.Curl()
-    body = cStringIO.StringIO()
-    hdr = cStringIO.StringIO()
-    c.setopt(c.WRITEFUNCTION, body.write)
-    c.setopt(c.HEADERFUNCTION, hdr.write)
-    c.setopt(c.URL, (self.q_url + qname + '/' + method))
-    c.setopt(c.VERBOSE, False)
-    c.setopt(pycurl.POST, 1)
-    c.setopt(c.SSL_VERIFYPEER, False)
-    c.setopt(c.USERAGENT, useragent)
-    c.setopt(c.HTTPHEADER, qclient_header)
-    c.setopt(c.HTTPHEADER, content_type_header)
-    c.setopt(c.HTTPHEADER, accept_header)
-    c.setopt(c.HTTPHEADER, auth_token_header)
-    c.setopt(c.POSTFIELDS, payload)
-    c.perform()
-    return_code = c.getinfo(pycurl.HTTP_CODE)
-    hdr_response = hdr.getvalue()
-    body_response = body.getvalue()
-    
-    print "the HEADER:"
-    print hdr_response
-    print ""
-    print "The BODY:"
-    print body_response
-    
-    body.close()
-    hdr.close()
-    c.close()
-
-
-  def checkStats(self, qname, method='stats'):
-    """
-    $ curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/stats \
-    -H "X-Auth-Token: MYAUTHTOKEN"
-    
-    HTTP/1.1 200 OK
-    Content-Length: 51
-    Content-Type: application/json; charset=utf-8
-    Content-Location: /v1/queues/NEWQUEUNAME/stats
-    
-    {"messages": {"claimed": 0, "total": 0, "free": 0}}
-    
-    
-    TESTED SUCCESSFULLY
-    """
-    auth_token_header = "X-Auth-Token: %s" % self.api_token
-    #q_url = "https://ord.queues.api.rackspacecloud.com/v1/queues/"  
-    useragent = "KidRack"
-    
-    c = pycurl.Curl()
-    body = cStringIO.StringIO()
-    hdr = cStringIO.StringIO()
-    c.setopt(c.WRITEFUNCTION, body.write)
-    c.setopt(c.HEADERFUNCTION, hdr.write)
-    c.setopt(c.URL, (self.q_url + qname + '/' + method))
-    c.setopt(c.VERBOSE,False)
-    c.setopt(c.SSL_VERIFYPEER, False)
-    c.setopt(c.USERAGENT, useragent)
-    c.setopt(c.HTTPHEADER, [auth_token_header])
-    c.perform()
-    return_code = c.getinfo(pycurl.HTTP_CODE)
-    hdr_response = hdr.getvalue()
-    body_response = body.getvalue()
-    
-    print "the HEADER:"
-    print hdr_response
-    print ""
-    print "The BODY:"
-    print body_response
-    
-    body.close()
-    hdr.close()
-    c.close()
-
-
-  def listMessages(self, qname, message_id):
-    """
-    GET /v1/queues/{queue_name}/messages/{messageID}{?marker,limit,echo,include_claimed}
-    
-    curl -i -X GET https://ord.queues.api.rackspacecloud.com/v1/queues/NEWQUEUNAME/messages/{message ID} \
-    -H "Client-ID: QClient" \
-    -H "X-Auth-Token: MYAUTHTOKEN" \
-    -H "Accept: application/json"
-    
-    HAVING PROBLEMS LISTING MESSAGES!!!!!!
-    """
-    auth_token_header = ["X-Auth-Token: %s" % self.api_token]
-    useragent = "KidRack"
-    
-    c = pycurl.Curl()
-    body = cStringIO.StringIO()
-    hdr = cStringIO.StringIO()
-    c.setopt(c.WRITEFUNCTION, body.write)
-    c.setopt(c.HEADERFUNCTION, hdr.write)
-    c.setopt(c.URL, q_url + qname + '/messages/' + message_id)
-    c.setopt(c.VERBOSE, False)
-    c.setopt(c.SSL_VERIFYPEER, False)
-    c.setopt(c.USERAGENT, useragent)
-    c.setopt(c.HTTPHEADER, auth_token_header)
-    c.perform()
-    return_code = c.getinfo(pycurl.HTTP_CODE)
-    hdr_response = hdr.getvalue()
-    body_response = body.getvalue()
-    return body_response
-    #print q_url + qname + '/messages/' + message_id
-
-
-
+q_url = 'https://ord.queues.api.rackspacecloud.com'
+url = q_url
 
 class SyslogDB():
   """Manage connections to local mysql syslog database.  When we create the SyslogDB object it will automatically authenticate so we are
@@ -680,6 +314,7 @@ class SyslogDB():
     cursor.execute(statement)
     qlogger.info("Statement executed")
     last_record = cursor.fetchone()
+    db.close()
     return last_record[0]
 
   def archiveMessage(self, statement):
@@ -701,7 +336,7 @@ class SyslogDB():
     cursor.execute(statement)
     #To get row count of returned results
     qlogger.info("Statement executed")
-    cursor.rowcount       #<---read-only attribute
+    #cursor.rowcount       #<---read-only attribute
     ##To fetch a single row at a time
     #data = cursor.fetchone()
     #To fetch all rows at once into tuples
@@ -711,47 +346,279 @@ class SyslogDB():
 
 
 
+class Queue_Connection(object):
+
+  def __init__(self, username, apikey):
+    url = 'https://identity.api.rackspacecloud.com/v2.0/tokens'
+    payload  = {"auth":{"RAX-KSKEY:apiKeyCredentials":{"username": username , "apiKey": apikey }}}
+    headers = {'Content-Type': 'application/json'}
+    r = requests.post(url, data=json.dumps(payload), headers=headers)
+    self.token = r.json()['access']['token']['id']
+    self.headers = {'X-Auth-Token' : self.token, 'Content-Type': 'application/json', 'Client-ID': 'QClient1'}
+
+  def token(self):
+    return self.token
+
+  def get(self, url, payload=None):
+    r = requests.get(url, data=json.dumps(payload), headers=self.headers)
+    return [r.status_code, r.headers, r.content]
+
+  def post(self, url, payload=None):
+    r = requests.post(url, data=json.dumps(payload), headers=self.headers)
+    return [r.status_code, r.headers, r.content]
+
+  def put(self, url, payload=None):
+    r = requests.put(url, data=json.dumps(payload), headers=self.headers)
+    return [r.status_code, r.headers, r.content]
+
+  def delete(self, url, payload=None):
+    r = requests.delete(url, data=json.dumps(payload), headers=self.headers)
+    return [r.status_code, r.headers, r.content]
+
+
+class Producer(Queue_Connection):
+
+    def __init__(self, url, username, apikey):
+        super(Producer, self).__init__(username, apikey)               
+        self.base_url = url
+
+    def queue_name():
+        def fget(self):
+            return self._queue_name
+        def fset(self, value):
+            self._queue_name = value
+        def fdel(self):
+            del self._queue_name
+        return locals()
+    queue_name = property(**queue_name())
+
+
+    def queue_exists(self):
+        url = self.base_url + '/v1/queues/' + self.queue_name + '/stats'
+        if self.get(url)[0] == 200:
+            return True
+        return False
+
+    def create_queue(self, payload=None):
+        url = self.base_url + "/v1/queues/" + self.queue_name
+        res =  self.put(url, payload)
+        if res[0] == 200:
+            print '%s created' % self.queue_name
+        elif res[0] == 204:
+            print 'A queue named %s is present' % self.queue_name
+        else:
+            print 'Problem with queue creation,'
+
+    def post_messages(self, payload):
+        url = self.base_url + '/v1/queues/' + self.queue_name + '/messages'
+        res = self.post(url, payload)
+        if res[0] == 201:
+            return json.loads(res[2])['resources']
+        else:
+            print "Couldn't post messages"
+
+class Consumer(Queue_Connection):
+
+    def __init__(self, url, username, apikey):
+        super(Consumer, self).__init__(username, apikey)                
+        self.base_url = url
+
+    def claim_messages(self, payload, limit=1):
+        url = self.base_url + '/v1/queues/' + self.queue_name + '/claims?limit=' + str(limit)
+        res = self.post(url, payload)
+        if res[0] == 200:
+            return json.loads(res[2])
+        else:
+            print "Couldn't claim messages"
+
+    def get_messages(self, limit=10):
+        """
+        $curl -i -X GET "https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue/messages?echo=true" 
+        -H "Client-ID: QClient" -H "X-Auth-Token: AUTHTOKEN" -H "Content-type: application/json"
+        """
+        url = self.base_url + '/v1/queues/' + self.queue_name + '/messages?echo=true&limit=' + str(limit)
+        payload = {'X-Auth-Token' : self.token, 'Content-Type': 'application/json'}
+        #res = self.get(url)
+        res = self.get(url, payload)
+        print res
+
+    def delete_message(self, url):
+        url = self.base_url + url
+        res = self.delete(url)
+        if res[0] == 204:
+            print "Message deleted"
 
 
 #========================================================================================
 # LOGIC
 #========================================================================================
 
-#Create a connection to the f2b database
-f2b_db_object = SyslogDB(F2BDB)
-#Create a connection to the Syslog database
-syslog_db_object = SyslogDB(syslog_db_name)
+# #Create a connection to the f2b database
+# f2b_db_object = SyslogDB(F2BDB)
+# #Create a connection to the Syslog database
+# syslog_db_object = SyslogDB(syslog_db_name)
 
-#Find the last syslogID that was processed and save it.  This will come from the f2b database.  If this is the first run
-#and there isn't any table data yet then it will return a TypeError when trying to getLastID() in which case we just 
-#set the last_syslogID to 0.  Setting last_syslogID to 0 will enable a full list of banned messages.
-try:
-    last_syslogID = f2b_db_object.getLastID()
-except TypeError:
-    last_syslogID = 0
-print last_syslogID
+# #Find the last syslogID that was processed and save it.  This will come from the f2b database.  If this is the first run
+# #and there isn't any table data yet then it will return a TypeError when trying to getLastID() in which case we just 
+# #set the last_syslogID to 0.  Setting last_syslogID to 0 will enable a full list of banned messages.
+# try:
+#     last_syslogID = f2b_db_object.getLastID()
+# except TypeError:
+#     last_syslogID = 0
+# print last_syslogID
 
-#Return all ban messages with a syslog ID greater that last_syslogID
-qmessages = syslog_db_object.find_Bans(last_syslogID)   # <--this returns a list of strings
-#print qmessages
+# #Return all ban messages with a syslog ID greater that last_syslogID
+# qmessages = syslog_db_object.find_Bans(last_syslogID)   # <--this returns a list of strings
+# print qmessages
 
-#Add banned ip address messages to f2b database
-for ban in qmessages:
-    #insert each 'ban' message into our f2b database to track syslogIDs
-    msg = "INSERT INTO archived_messages (host, syslogid, bannedIP) VALUES ('%s', '%s', '%s');" % (ban['sourceHost'], ban['syslogID'], ban['bannedIP'])
-    #f2b_db_object.archiveMessage(msg)    # <---insert message into f2b database
-    #print msg
+# #Add banned ip address messages to f2b database
+# for ban in qmessages:
+#     #insert each 'ban' message into our f2b database to track syslogIDs
+#     msg = "INSERT INTO archived_messages (host, syslogid, bannedIP) VALUES ('%s', '%s', '%s');" % (ban['sourceHost'], ban['syslogID'], ban['bannedIP'])
+#     #f2b_db_object.archiveMessage(msg)    # <---insert message into f2b database
+#     print msg
 
-#Create list of IP addresses from the message list, then de-duplicate this list
-send_IPs_to_queue = [i['bannedIP'] for i in qmessages]
-send_IPs_to_queue = set(send_IPs_to_queue)  # <-- de-duplicate the list of IP addresses using 'set'
+# send_IPs_to_queue = [i['bannedIP'] for i in qmessages]
+# send_IPs_to_queue = set(send_IPs_to_queue)  # <-- de-duplicate the list of IP addresses using 'set'
 
-#Create a connection to cloud queue
-cq_conn = Cloud_Queue()
-print ""
-#print cq_conn.listQueues()
-print ""
-print cq_conn.listMessages('kidrack_queue', '524231f453273d7bb255301c')
-print ""
+
+# #Create a producser that will push messages into the queue.  Each IP sent individually to queue
+# pub = Producer(url,cloud_username,cloud_api_key)
+# pub.queue_name = 'kidrack_queue'
+# print pub.queue_name
+
+# for ip in send_IPs_to_queue:
+#   payload = [{"ttl": 600,"body": {"task":"one"}},{"ttl": 600,"body": {"task":"%s" % ip}}]    
+#   pub.post_messages(payload)
+#   print "posted message with ip %s" % ip 
+
+
+#====================================================================================
+def server():
+    #Create a connection to the f2b database
+    qlogger.info("Connecting to the f2b database")
+    f2b_db_object = SyslogDB(F2BDB)
+    qlogger.info("Done!")
+
+    #Here we make an initial pass over the f2b database.  If no records found considered first run. 
+    #Query for the last syslog ID in f2b database.  If no entries then TypeError exception returned and set last_syslogID to 0
+    qlogger.info("Making inital pass over the f2b database.  If no syslog IDs found the considering this the 'first run'")
+    try:
+      last_syslogID = f2b_db_object.getLastID()
+      last_syslogID_old = last_syslogID   # <--- initilize this variable to hold 'last' value during previous loop iteration
+    except TypeError:
+      last_syslogID = 0   # <--- Considering this the first run
+      last_syslogID_old = last_syslogID  # <--- initilize this variable to hold 'last' value during previous loop iteration
+    if last_syslogID == 0:
+      qlogger.info("First Run!  Setting last syslogID to 0.  Mining for ALL messages in syslog database")
+    else:
+      qlogger.info("Last syslogID is set to: %s" % last_syslogID)
+
+    #Create a connection to the Syslog database
+    qlogger.info("Connecting to syslog database")
+    syslog_db_object = SyslogDB(syslog_db_name)
+    qlogger.info("Done!")
+
+
+
+    #Start our while loop which will check for new banned IP address every 1 minute and process them accordingly
+    while True:    
+        try:
+            last_syslogID = f2b_db_object.getLastID()
+        except:
+            last_syslogID = 0    
+        qlogger.info("Last syslog ID: %s" % last_syslogID)
+
+        #Make an initial pass on syslog database for bans. Return all ban messages with a syslog ID greater that last_syslogID
+        qlogger.info("Making initial pass over syslog database looking for banned IP addresses")
+        qmessages = syslog_db_object.find_Bans(last_syslogID)
+        #Add banned ip address messages to f2b database. 
+        for ban in qmessages:
+            #insert each 'ban' message into our f2b database to track syslogIDs
+            msg = "INSERT INTO archived_messages (host, syslogid, bannedIP) VALUES ('%s', '%s', '%s');" % (ban['sourceHost'], ban['syslogID'], ban['bannedIP'])
+            f2b_db_object.archiveMessage(msg)    # <---insert message into f2b database
+            qlogger.info("Archived Messages:\n%s" % msg) 
+
+        #Set up banned IP list (de-duplicated)
+        send_IPs_to_queue = [i['bannedIP'] for i in qmessages]
+        send_IPs_to_queue = set(send_IPs_to_queue)  # <-- de-duplicate the list of IP addresses using 'set'
+
+        #Create a producser that will push messages into the queue.  Each IP sent individually to queue
+        qlogger.info("Creating message producer...")
+        pub = Producer(url,cloud_username,cloud_api_key)
+        pub.queue_name = 'kidrack_queue'
+        qlogger.info("Plublishing to queue, %s" % pub.queue_name)
+
+        qlogger.info("Sending IPs to queue for processessing")
+        for ip in send_IPs_to_queue:
+          payload = [{"ttl": 60,"body": {"banned IP":"%s" % ip}}]    
+          pub.post_messages(payload)
+          qlogger.info("posted message with ip %s" % ip)
+        qlogger.info("Sleeping for 20 seconds!")
+        sleep(20)
+
+
+def client(qname):
+    """
+    Returns a json object containing all messages.
+
+    $curl -i -X GET "https://ord.queues.api.rackspacecloud.com/v1/queues/kidrack_queue/messages?echo=true" 
+    -H "Client-ID: QClient" -H "X-Auth-Token: AUTHTOKEN" -H "Content-type: application/json"
+
+    self.headers = {'X-Auth-Token' : self.token, 'Content-Type': 'application/json', 'Client-ID': 'QClient1'}
+
+    --
+    test = client('kidrack_queue')
+    try to grab messages until this exception  ValueError: No JSON object could be decoded
+    it will get 10 messages at a time
+    """
+    useragent = "KidRack"
+    my_base_url = 'https://ord.queues.api.rackspacecloud.com'
+    url_location = '/v1/queues/%s/messages?echo=true&limit=10' % qname
+    url_location_after_first_pass = ''
+    #myurl = q_url
+    #myurl = 'https://ord.queues.api.rackspacecloud.com/v1/queues/%s/messages?echo=true&limit=10' % qname
+    myurl = my_base_url + url_location
+    print 'this is my url \n%s' % myurl
+    print ""
+    cmd = """curl -i -X GET "%s" \
+    -H "Content-type: application/json" \
+    -H "Client-ID: QClient" \
+    -H "X-Auth-Token: %s" \
+    """ % (myurl, cloud_api_token)
+    messages = []
+    cmd_output = subprocess.check_output(cmd, shell=True)
+    cmd_output = json.loads(cmd_output.split('\r\n\r\n', 1)[1])   # <----split the header off the results
+    url_location_after_first_pass = cmd_output['links'][0]['href']      # <---this is url_location_after_first_pass
+    return messages
+
+server()
+
+# def main():
+#   parser = argparse.ArgumentParser(prog='Cloud_Queue.py', description='Used as Cloud Queue server or client for distributed fail2ban')
+#   group = parser.add_mutually_exclusive_group()
+#   group.add_argument("-s", "--server", help="Run in server mode.  Allows interaction with local databases.  \
+#     Script becomes producer for cloud queue also.", action="store_true")
+#   group.add_argument("-c", "--client", help="Run in client mode.  Poll the cloud queue for new 'banned ip' messages \
+#     and process these messages accordingly.", action="store_true")
+#   #parser.add_argument('--uuid', '-u',required=True, nargs=1, help='-u $SERVER_INSTANCE_ID|name-label UUID')
+#   args = parser.parse_args()
+#   #print ("Input file: %s" % args.uuid )
+#   if args.server:
+#     server()
+
+
+
+
+
+# if __name__ == "__main__" :
+#   try:
+#     main()
+#   except Exception, e:
+#     print "Error: %s" % e
+#     print ""
+#     print 'Enter correct instance UUID or verify that instance exists and then retry'
+#     print ""
+#     sys.exit()
 
 
